@@ -1,20 +1,20 @@
 # Laneora
 
-Laneora is a Windows desktop client for DAT board streams. It signs in against `soft.awwthat.com`, selects a stream, applies the assigned HTTP proxy, and opens embedded Chromium tabs (Qt WebEngine) for DAT One / DAT Power workflows.
+Laneora is a Windows desktop client for DAT board streams. It signs in against **`soft.awwthat.com`** (source of truth for admin, streams, proxies, cookies), then opens embedded Chromium tabs (Qt WebEngine) for DAT One / DAT Power workflows.
 
-**New private GitHub repo:** https://github.com/mafzalkalwardev/laneora  
-This project is separate from the older Awwthat Pro folder/repo — that tree was left untouched.
+**Private GitHub repo:** https://github.com/mafzalkalwardev/laneora  
 
 ## Features
-- Login + subscription/stream limits (`/authenticate`, `/logger`)
-- Stream picker with per-stream encrypted session payloads
+- Login + subscription/stream limits (`/authenticate`, `/logger`) against soft.awwthat.com
+- Local **credentials roster** so you can inject multiple soft accounts for testing
+- Stream picker with per-stream encrypted session payloads from soft
 - HTTP proxy injection (`px` / `pu` / `pd` + port `p`)
 - Embedded browser tabs (Chrome UA, usurpModal remover JS)
 - Cookie + localStorage session restore
 - Timezone sync via `ipinfo.io` + Windows `tzutil`
 - Speedtest tab (`fast.com`)
 - AES/CryptoJS-compatible decrypt helpers
-- Auto-update check (`/latest_version`, `/update`)
+- Auto-update check (`/latest_version`, `/update`) with safe version compare
 
 ## Setup (Windows)
 ```powershell
@@ -23,47 +23,47 @@ py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 python scripts\make_brand.py
-```
-
-Or double-click `Start Laneora.bat` (starts local API + app).
-
-## Local test logins (default)
-The app talks to a **local Soft-compatible API** at `http://127.0.0.1:8787` by default.
-
-| Username | Password | Streams |
-|----------|----------|---------|
-| `admin`  | `admin123` | one, power |
-| `tester` | `test123`  | one |
-
-Start API, then app:
-```powershell
-# terminal 1
-python server\local_api.py
-
-# terminal 2
 python -m app
 ```
 
-### Inject your own users
-```powershell
-python scripts\add_user.py myuser mypass
-python scripts\add_user.py dispatcher secret --streams one,power
-```
-Users are stored in `data/users.json` (edit freely). Restart is not required for new users on next login.
+Or double-click `Start Laneora.bat`.
 
-### Point at real soft.awwthat.com (or your future host)
+## Inject soft users for testing
+Laneora **does not create accounts on soft.awwthat.com**. It stores credentials locally and uses them to log into soft.
+
 ```powershell
-$env:LANEORA_SERVER_URL = "https://soft.awwthat.com"
-$env:LANEORA_SKIP_UPDATE = "0"
+python scripts\add_user.py yourSoftUser yourSoftPass
+python scripts\add_user.py anotherUser anotherPass --label "Dispatcher 2"
+```
+
+Roster file: [`data/users.json`](data/users.json)
+
+In the login UI:
+1. Pick an injected user from the dropdown (autofills username/password), or type manually
+2. Click **Login** — authenticates against `https://soft.awwthat.com`
+3. Successful logins are also saved to the roster automatically
+4. Use **Save current to roster** to store typed credentials without waiting for login
+
+## Point at your future host (later)
+```powershell
+$env:LANEORA_SERVER_URL = "https://api.yourdomain.com"
 python -m app
+```
+
+Optional offline stub (not used by default): `python server\local_api.py` then  
+`$env:LANEORA_SERVER_URL = "http://127.0.0.1:8787"`.
+
+Skip remote update download:
+```powershell
+$env:LANEORA_SKIP_UPDATE = "1"
 ```
 
 ## Test checklist
-1. Start `server\local_api.py`
+1. Inject at least one real soft.awwthat.com account via `scripts/add_user.py`
 2. Run `python -m app`
-3. Login as `admin` / `admin123`
-4. Open a stream — DAT tabs should load (direct / no proxy in local mode)
-5. Confirm SpeedTest tab and reconnect
+3. Select the user (or type soft admin credentials)
+4. Confirm streams/proxy come from soft and DAT tabs load
+5. Confirm SpeedTest + reconnect
 
 ## Optional EXE build
 ```powershell
@@ -71,6 +71,6 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 ```
 
 ## Notes
-- API host remains `https://soft.awwthat.com` so existing credentials work.
+- Soft remains the source of truth until you seed your own admin/API.
 - Large reference EXE is gitignored under `_reference/`.
-- Recovery evidence lives in `recovery/` (disassembly + notes), not required at runtime.
+- Recovery evidence lives in `recovery/` (not required at runtime).

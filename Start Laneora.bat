@@ -8,6 +8,6 @@ if not exist ".venv\Scripts\python.exe" (
   ".venv\Scripts\python.exe" scripts\make_brand.py
 )
 
-start "Laneora Local API" cmd /k ""%~dp0.venv\Scripts\python.exe" "%~dp0server\local_api.py""
-timeout /t 2 /nobreak >nul
+REM Auth/streams come from soft.awwthat.com by default.
+REM Inject soft test accounts first:  .venv\Scripts\python.exe scripts\add_user.py USER PASS
 ".venv\Scripts\python.exe" -m app

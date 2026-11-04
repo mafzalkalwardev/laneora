@@ -14,6 +14,7 @@ from PyQt5.QtGui import QFont, QIcon, QPixmap
 from PyQt5.QtWidgets import (
     QAction,
     QApplication,
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -31,6 +32,7 @@ from app import APP_NAME, PASSPHRASE, POWER_DAT, SERVER_URL, SPEEDTEST_URL, __ve
 from app.auth import AuthError, AuthSession, authenticate, reauthenticate, start_logger_heartbeat
 from app.browser import apply_cookies, attach_checker_script, clear_profile, inject_local_storage
 from app.crypto_util import decrypt
+from app.roster import load_roster, upsert_user
 from app.streams import apply_http_proxy
 from app.timezone_util import sync_timezone_from_ip
 
@@ -85,6 +87,7 @@ class MainWindow(QMainWindow):
 
     def _build_login(self) -> None:
         self.remove_all_widgets()
+        self._roster = load_roster()
 
         logo_box = QHBoxLayout()
         logo_label = QLabel()
@@ -99,15 +102,26 @@ class MainWindow(QMainWindow):
         title = QLabel(APP_NAME)
         title.setObjectName("brandTitle")
         self.layout.addWidget(title)
-        sub = QLabel("Secure DAT board streams for dispatch teams")
+        sub = QLabel(f"Auth + streams from {SERVER_URL}")
         sub.setObjectName("brandSubtitle")
         self.layout.addWidget(sub)
+
+        roster_label = QLabel("Injected soft users:")
+        roster_label.setObjectName("fieldLabel")
+        self.layout.addWidget(roster_label)
+        self.roster_combo = QComboBox()
+        self.roster_combo.addItem("— type credentials manually —", None)
+        for user in self._roster:
+            display = user.get("label") or user["username"]
+            self.roster_combo.addItem(display, user)
+        self.roster_combo.currentIndexChanged.connect(self._on_roster_selected)
+        self.layout.addWidget(self.roster_combo)
 
         user_label = QLabel("Username:")
         user_label.setObjectName("fieldLabel")
         self.layout.addWidget(user_label)
         self.username_edit = QLineEdit()
-        self.username_edit.setPlaceholderText("account username")
+        self.username_edit.setPlaceholderText("soft.awwthat.com username")
         self.layout.addWidget(self.username_edit)
 
         pass_label = QLabel("Password:")
@@ -115,17 +129,45 @@ class MainWindow(QMainWindow):
         self.layout.addWidget(pass_label)
         self.password_edit = QLineEdit()
         self.password_edit.setEchoMode(QLineEdit.Password)
-        self.password_edit.setPlaceholderText("account password")
+        self.password_edit.setPlaceholderText("soft.awwthat.com password")
         self.layout.addWidget(self.password_edit)
 
         self.login_button = QPushButton("Login")
         self.login_button.clicked.connect(self.login)
         self.layout.addWidget(self.login_button)
+
+        self.save_roster_button = QPushButton("Save current to roster")
+        self.save_roster_button.setObjectName("secondaryButton")
+        self.save_roster_button.clicked.connect(self._save_current_to_roster)
+        self.layout.addWidget(self.save_roster_button)
         self.layout.addStretch(1)
 
-        version_line = QLabel(f"{APP_NAME} v{__version__}")
+        version_line = QLabel(
+            f"{APP_NAME} v{__version__} · inject users: python scripts/add_user.py user pass"
+        )
         version_line.setObjectName("brandSubtitle")
         self.layout.addWidget(version_line)
+
+    def _on_roster_selected(self, _index: int) -> None:
+        user = self.roster_combo.currentData()
+        if not user:
+            return
+        self.username_edit.setText(user.get("username", ""))
+        self.password_edit.setText(user.get("password", ""))
+
+    def _save_current_to_roster(self) -> None:
+        username = self.username_edit.text().strip()
+        password = self.password_edit.text().strip()
+        if not username or not password:
+            QMessageBox.warning(self, "Error", "Enter username and password first.")
+            return
+        upsert_user(username, password)
+        QMessageBox.information(self, "Saved", f"Added '{username}' to local roster.")
+        # refresh dropdown without clearing typed fields
+        current_user, current_pass = username, password
+        self._build_login()
+        self.username_edit.setText(current_user)
+        self.password_edit.setText(current_pass)
 
     def kill_proc_tree(self, pid: int | None = None, including_parent: bool = True) -> None:
         pid = pid or os.getpid()
@@ -157,6 +199,11 @@ class MainWindow(QMainWindow):
             return
 
         self.session = session
+        # Remember successful soft credentials for quicker retests
+        try:
+            upsert_user(session.username, self.password_edit.text().strip() or session.password)
+        except Exception as exc:  # noqa: BLE001
+            print("roster save:", exc)
         QMessageBox.information(
             self,
             "Success",
