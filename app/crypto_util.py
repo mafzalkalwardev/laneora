@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import binascii
 import hashlib
+import os
 from typing import Any
 
 from Crypto.Cipher import AES
@@ -45,6 +46,23 @@ def _pkcs7_unpad(text: str) -> str:
     if pad < 1 or pad > 16:
         return text
     return text[:-pad]
+
+
+def _pkcs7_pad(data: bytes) -> bytes:
+    pad = 16 - (len(data) % 16)
+    return data + bytes([pad] * pad)
+
+
+def encrypt(passphrase: str, plaintext: str) -> str:
+    """Encrypt to CryptoJS/OpenSSL Salted__ base64 (matches decrypt())."""
+    salt = os.urandom(8)
+    derived = evp_kdf(passphrase, salt, key_size=12)
+    key_material = derived["key"]
+    iv = key_material[len(key_material) - 16 :]
+    key = key_material[: len(key_material) - 16]
+    aes = AES.new(key, AES.MODE_CBC, iv)
+    cipher = aes.encrypt(_pkcs7_pad(plaintext.encode("utf-8")))
+    return binascii.b2a_base64(b"Salted__" + salt + cipher, newline=False).decode("ascii")
 
 
 def decrypt(passphrase: str, encrypted_text: str) -> str:

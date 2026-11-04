@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 import requests
 
-from app import SERVER_URL
+from app.config import SERVER_URL
 
 _WS_RE = re.compile(r"^[\s\u200B\u00A0]+|[\s\u200B\u00A0]+$")
 

@@ -23,15 +23,47 @@ py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 python scripts\make_brand.py
+```
+
+Or double-click `Start Laneora.bat` (starts local API + app).
+
+## Local test logins (default)
+The app talks to a **local Soft-compatible API** at `http://127.0.0.1:8787` by default.
+
+| Username | Password | Streams |
+|----------|----------|---------|
+| `admin`  | `admin123` | one, power |
+| `tester` | `test123`  | one |
+
+Start API, then app:
+```powershell
+# terminal 1
+python server\local_api.py
+
+# terminal 2
 python -m app
 ```
 
-## Test with your accounts
-1. Run `python -m app`
-2. Sign in with a known-good `soft.awwthat.com` username/password
-3. Confirm stream buttons appear from `active_subs`
-4. Open a stream — proxy should apply; DAT tabs should load
-5. Confirm cookies/localStorage restore, SpeedTest tab, and reconnect
+### Inject your own users
+```powershell
+python scripts\add_user.py myuser mypass
+python scripts\add_user.py dispatcher secret --streams one,power
+```
+Users are stored in `data/users.json` (edit freely). Restart is not required for new users on next login.
+
+### Point at real soft.awwthat.com (or your future host)
+```powershell
+$env:LANEORA_SERVER_URL = "https://soft.awwthat.com"
+$env:LANEORA_SKIP_UPDATE = "0"
+python -m app
+```
+
+## Test checklist
+1. Start `server\local_api.py`
+2. Run `python -m app`
+3. Login as `admin` / `admin123`
+4. Open a stream — DAT tabs should load (direct / no proxy in local mode)
+5. Confirm SpeedTest tab and reconnect
 
 ## Optional EXE build
 ```powershell

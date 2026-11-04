@@ -10,6 +10,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtWidgets import QMessageBox
 
 from app import APP_NAME, SERVER_URL, __version__
+from app.config import SKIP_UPDATE
 
 
 class UpdateDownloadThread(QThread):
@@ -56,16 +57,25 @@ def execute_update(update_exe: str) -> None:
         print("Failed to execute update:", exc)
 
 
+def _version_tuple(value: str) -> tuple[int, ...]:
+    parts: list[int] = []
+    for chunk in value.strip().split("."):
+        try:
+            parts.append(int(chunk))
+        except ValueError:
+            parts.append(0)
+    return tuple(parts) or (0,)
+
+
 def check_for_updates(window, on_start_download: Callable[[str], None] | None = None) -> None:
+    if SKIP_UPDATE:
+        print("Update check skipped (local/test server mode)")
+        return
     try:
         remote = requests.get(SERVER_URL + "/latest_version", timeout=20).text.strip()
         print("Remote Version :", remote)
         print("Local Version :", __version__)
-        # compare as floats when possible
-        try:
-            need = float(remote) > float(__version__)
-        except ValueError:
-            need = remote != __version__
+        need = _version_tuple(remote) > _version_tuple(__version__)
         if not need:
             print("You have latest version")
             return
