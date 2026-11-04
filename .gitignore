@@ -13,5 +13,8 @@ dist/
 *.spec
 _reference/*.exe
 recovery/extracted/
+Laneora*.exe
+*.exe
+!scripts/**/*.exe
 .DS_Store
 Thumbs.db
