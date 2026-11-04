@@ -1,0 +1,131 @@
+* {
+    font-family: "Segoe UI", "IBM Plex Sans", "Source Sans 3", sans-serif;
+    color: #E8EEF7;
+}
+
+QMainWindow, QWidget {
+    background-color: #0B1220;
+}
+
+QLabel#brandTitle {
+    font-size: 34px;
+    font-weight: 700;
+    color: #F5A524;
+    letter-spacing: 1px;
+}
+
+QLabel#brandSubtitle {
+    font-size: 13px;
+    color: #9AA8BC;
+}
+
+QLabel#fieldLabel {
+    font-size: 14px;
+    font-weight: 600;
+    color: #E8EEF7;
+}
+
+QLineEdit {
+    background-color: #141C2B;
+    border: 1px solid #2A364A;
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 15px;
+    selection-background-color: #F5A524;
+    selection-color: #0B1220;
+}
+
+QLineEdit:focus {
+    border: 1px solid #F5A524;
+}
+
+QPushButton {
+    background-color: #F5A524;
+    color: #0B1220;
+    border: none;
+    border-radius: 10px;
+    padding: 12px 18px;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+QPushButton:hover {
+    background-color: #FFB84A;
+}
+
+QPushButton:pressed {
+    background-color: #D89012;
+}
+
+QPushButton#secondaryButton {
+    background-color: #1A2436;
+    color: #E8EEF7;
+    border: 1px solid #2A364A;
+}
+
+QPushButton#secondaryButton:hover {
+    border-color: #F5A524;
+    color: #F5A524;
+}
+
+QPushButton#streamButton {
+    background-color: #141C2B;
+    color: #E8EEF7;
+    border: 2px solid #2A364A;
+    border-radius: 14px;
+    padding: 22px;
+    font-size: 22px;
+    font-weight: 700;
+    min-height: 64px;
+}
+
+QPushButton#streamButton:hover {
+    border-color: #F5A524;
+    color: #F5A524;
+}
+
+QTabWidget::pane {
+    border: 1px solid #2A364A;
+    background: #0B1220;
+}
+
+QTabBar::tab {
+    background: #141C2B;
+    color: #9AA8BC;
+    padding: 8px 14px;
+    margin-right: 2px;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+}
+
+QTabBar::tab:selected {
+    background: #1A2436;
+    color: #F5A524;
+}
+
+QToolBar {
+    background: #141C2B;
+    border-bottom: 1px solid #2A364A;
+    spacing: 8px;
+    padding: 6px;
+}
+
+QToolButton, QToolBar QLabel {
+    color: #E8EEF7;
+}
+
+QMessageBox {
+    background-color: #141C2B;
+}
+
+QProgressBar {
+    border: 1px solid #2A364A;
+    border-radius: 6px;
+    background: #141C2B;
+    text-align: center;
+    color: #E8EEF7;
+}
+
+QProgressBar::chunk {
+    background-color: #F5A524;
+}
