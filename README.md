@@ -150,6 +150,7 @@ Current product version: **v3.0.0** (see [Releases](https://github.com/mafzalkal
 ## Notes
 
 - Soft remains the source of truth until you seed your own admin/API.  
+- If login shows **Soft server error (HTTP 500)**, Soft’s `/authenticate` route is failing on the server (Laneora roster injection is fine). Other Soft routes like `/latest_version` may still work.  
 - Large reference binaries are gitignored (`_reference/`, `*.exe`).  
 - Recovery / reverse-engineering notes live in `recovery/` (not required at runtime).  
 

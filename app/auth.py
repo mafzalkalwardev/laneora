@@ -5,7 +5,6 @@ import json
 import random
 import re
 import threading
-import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -39,7 +38,7 @@ class AuthSession:
 
     @property
     def proxy_port(self) -> int:
-        return int(self.resp.get("p", 0))
+        return int(self.resp.get("p", 0) or 0)
 
     @property
     def proxy_user(self) -> str:
@@ -59,30 +58,65 @@ class AuthError(Exception):
     pass
 
 
+def _parse_authenticate_body(raw: str, status_code: int) -> Any:
+    text = (raw or "").strip()
+    if text == "0":
+        return 0
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        if status_code >= 500:
+            raise AuthError(
+                f"Soft server error (HTTP {status_code}). "
+                f"{SERVER_URL}/authenticate is down or crashing — not a Laneora roster issue."
+            ) from exc
+        if "<html" in text.lower():
+            raise AuthError(
+                f"Soft returned HTML instead of JSON (HTTP {status_code}). "
+                "Check soft.awwthat.com /authenticate."
+            ) from exc
+        raise AuthError(
+            f"Unexpected authenticate response (HTTP {status_code}): {text[:160]!r}"
+        ) from exc
+
+
 def authenticate(username: str, password: str) -> AuthSession:
     username = normalize_credential(username)
     password = normalize_credential(password)
+    if not username or not password:
+        raise AuthError("Enter username and password.")
+
     value = random.randint(1, 99_999_999)
     is_alive = random.randint(1, 9999)
-    verify = requests.get(
-        SERVER_URL + "/authenticate",
-        params={
-            "username": username,
-            "key": password,
-            "value": value,
-            "is_alive": is_alive,
-        },
-        timeout=60,
-    )
-    raw = verify.text
     try:
-        resp = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise AuthError("Unexpected authenticate response") from exc
+        verify = requests.get(
+            SERVER_URL + "/authenticate",
+            params={
+                "username": username,
+                "key": password,
+                "value": value,
+                "is_alive": is_alive,
+            },
+            headers={"Accept": "application/json"},
+            timeout=60,
+        )
+    except requests.RequestException as exc:
+        raise AuthError(f"Could not reach Soft ({SERVER_URL}): {exc}") from exc
+
+    resp = _parse_authenticate_body(verify.text, verify.status_code)
+
+    if isinstance(resp, dict) and resp.get("message") and resp.get("status") != "okie":
+        # Laravel-style {"message":"Server Error"}
+        raise AuthError(
+            f"Soft authenticate failed (HTTP {verify.status_code}): {resp.get('message')}. "
+            "Fix soft.awwthat.com /authenticate, or temporarily use the local API for UI tests."
+        )
+
     if resp == 0 or resp == "0":
         raise AuthError("Incorrect username or password.")
     if not isinstance(resp, dict) or resp.get("status") != "okie":
         raise AuthError("Incorrect username or password.")
+
     return AuthSession(
         username=username,
         password=password,
@@ -105,6 +139,7 @@ def start_logger_heartbeat(
                 chk = requests.get(
                     SERVER_URL + "/logger",
                     params={"uva": session.log_data},
+                    headers={"Accept": "application/json"},
                     timeout=30,
                 )
                 if str(chk.text) == str(session.value):
@@ -123,17 +158,22 @@ def start_logger_heartbeat(
 
 def reauthenticate(session: AuthSession) -> AuthSession:
     """Refresh proxy/stream payloads with the same session tokens."""
-    verify = requests.get(
-        SERVER_URL + "/authenticate",
-        params={
-            "username": session.username,
-            "key": session.password,
-            "value": session.value,
-            "is_alive": session.is_alive,
-        },
-        timeout=60,
-    )
-    resp = json.loads(verify.text)
+    try:
+        verify = requests.get(
+            SERVER_URL + "/authenticate",
+            params={
+                "username": session.username,
+                "key": session.password,
+                "value": session.value,
+                "is_alive": session.is_alive,
+            },
+            headers={"Accept": "application/json"},
+            timeout=60,
+        )
+    except requests.RequestException as exc:
+        raise AuthError(f"Could not reach Soft ({SERVER_URL}): {exc}") from exc
+
+    resp = _parse_authenticate_body(verify.text, verify.status_code)
     if not isinstance(resp, dict) or resp.get("status") != "okie":
         raise AuthError("Re-authenticate failed")
     session.resp = resp
