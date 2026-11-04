@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="app/resources/logo.png" alt="Laneora logo" width="220" />
+
 # Laneora
 
 **DAT load-board stream client for truck dispatch teams**
@@ -9,8 +11,9 @@ Windows desktop app for DAT One / DAT Power workflows — Soft auth, proxied Web
 [![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![PyQt5](https://img.shields.io/badge/UI-PyQt5%20WebEngine-41CD52?logo=qt&logoColor=white)](https://www.riverbankcomputing.com/software/pyqt/)
 [![Platform](https://img.shields.io/badge/Platform-Windows-0078D4?logo=windows&logoColor=white)](#setup-windows)
-[![License](https://img.shields.io/badge/License-Private-lightgrey)](https://github.com/mafzalkalwardev/laneora)
+[![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/mafzalkalwardev/laneora)
 [![Release](https://img.shields.io/badge/Release-v3.0.0-F5A524)](https://github.com/mafzalkalwardev/laneora/releases)
+[![GitHub](https://img.shields.io/badge/GitHub-Public-181717?logo=github)](https://github.com/mafzalkalwardev/laneora)
 
 [Features](#features) · [Quick start](#setup-windows) · [Inject soft users](#inject-soft-users-for-testing) · [Keywords](#seo--keywords)
 
@@ -88,8 +91,19 @@ $env:LANEORA_SERVER_URL = "https://api.yourdomain.com"
 python -m app
 ```
 
-Optional offline stub (not default): `python server\local_api.py` then  
-`$env:LANEORA_SERVER_URL = "http://127.0.0.1:8787"`.
+Optional Soft-compatible offline stub (accounts in `data/local_users.json`):
+
+```powershell
+python server\local_api.py
+$env:LANEORA_SERVER_URL = "http://127.0.0.1:8787"
+python -m app
+```
+
+Multi-account Soft health + DAT URL decrypt check:
+
+```powershell
+python scripts\test_soft_and_accounts.py
+```
 
 Skip remote update download:
 

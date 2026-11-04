@@ -1,0 +1,70 @@
+{
+  "users": [
+    {
+      "username": "admin",
+      "password": "admin123",
+      "active": true,
+      "active_subs": ["one", "power"],
+      "px": "none",
+      "p": "0",
+      "pu": "",
+      "pd": "",
+      "streams": {
+        "one": {
+          "url": "https://one.dat.com",
+          "store": [],
+          "lst": "{}",
+          "sst": ""
+        },
+        "power": {
+          "url": "https://power.dat.com",
+          "store": [],
+          "lst": "{}",
+          "sst": ""
+        }
+      }
+    },
+    {
+      "username": "mafzalk",
+      "password": "mafzalk",
+      "active": true,
+      "active_subs": ["one"],
+      "px": "none",
+      "p": "0",
+      "pu": "",
+      "pd": "",
+      "streams": {
+        "one": {
+          "url": "https://one.dat.com",
+          "store": [],
+          "lst": "{}",
+          "sst": ""
+        }
+      }
+    },
+    {
+      "username": "dispatcher2",
+      "password": "dispatch123",
+      "active": true,
+      "active_subs": ["one", "power"],
+      "px": "none",
+      "p": "0",
+      "pu": "",
+      "pd": "",
+      "streams": {
+        "one": {
+          "url": "https://one.dat.com",
+          "store": [],
+          "lst": "{}",
+          "sst": ""
+        },
+        "power": {
+          "url": "https://power.dat.com",
+          "store": [],
+          "lst": "{}",
+          "sst": ""
+        }
+      }
+    }
+  ]
+}

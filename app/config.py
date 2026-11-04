@@ -6,7 +6,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
-USERS_FILE = DATA_DIR / "users.json"
+USERS_FILE = DATA_DIR / "users.json"  # Soft credentials roster (username/password)
+LOCAL_USERS_FILE = DATA_DIR / "local_users.json"  # Optional local Soft-compatible API accounts
 
 # Default: production Soft API. Override later for your own host:
 #   set LANEORA_SERVER_URL=https://api.yourdomain.com

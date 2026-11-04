@@ -8,7 +8,7 @@ Endpoints (same shapes as soft.awwthat.com):
   GET /latest_version
   HEAD|GET /update  (stub empty body)
 
-Users live in data/users.json — edit or run: python scripts/add_user.py
+Users live in data/local_users.json (not the Soft credentials roster).
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from app import PASSPHRASE, __version__  # noqa: E402
-from app.config import USERS_FILE  # noqa: E402
+from app.config import LOCAL_USERS_FILE  # noqa: E402
 from app.crypto_util import encrypt  # noqa: E402
 
 HOST = "127.0.0.1"
@@ -33,9 +33,9 @@ _LIVE: dict[str, str] = {}
 
 
 def _load_users() -> list[dict]:
-    if not USERS_FILE.exists():
+    if not LOCAL_USERS_FILE.exists():
         return []
-    data = json.loads(USERS_FILE.read_text(encoding="utf-8"))
+    data = json.loads(LOCAL_USERS_FILE.read_text(encoding="utf-8"))
     return list(data.get("users") or [])
 
 
@@ -153,16 +153,16 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    if not USERS_FILE.exists():
-        raise SystemExit(f"Missing {USERS_FILE}")
+    LOCAL_USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if not LOCAL_USERS_FILE.exists():
+        raise SystemExit(f"Missing {LOCAL_USERS_FILE}")
     users = _load_users()
     print(f"Laneora local API on http://{HOST}:{PORT}")
-    print(f"Users file: {USERS_FILE} ({len(users)} users)")
+    print(f"Users file: {LOCAL_USERS_FILE} ({len(users)} users)")
     print("Seeded logins (username / password):")
     for user in users:
         print(f"  - {user.get('username')} / {user.get('password')}")
-    print("Point the app at this host (default already set).")
+    print("Use: $env:LANEORA_SERVER_URL='http://127.0.0.1:8787'")
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
     try:
         httpd.serve_forever()
