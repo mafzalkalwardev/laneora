@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Laneora Admin</title>
+  <style>
+    :root {
+      --bg: #0B1220;
+      --card: #121A2A;
+      --line: #2A364A;
+      --text: #E8EEF7;
+      --muted: #9AA8BC;
+      --amber: #F5A524;
+      --amber-2: #FFB84A;
+      --danger: #F07178;
+      --ok: #7DCEA0;
+      --warn: #F5C16C;
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(1200px 500px at 50% -10%, #1A2740 0%, var(--bg) 55%);
+      color: var(--text);
+      font-family: "Segoe UI", sans-serif;
+    }
+    button, input, select { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    .wrap { width: min(1080px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 64px; }
+    .login-wrap { min-height: 100vh; display: grid; place-items: center; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 28px;
+    }
+    .login-card { width: min(420px, calc(100% - 32px)); text-align: center; }
+    img.mark { width: 72px; height: 72px; border-radius: 16px; }
+    h1 { margin: 14px 0 4px; font-size: 32px; color: var(--amber); font-weight: 700; }
+    .sub { color: var(--muted); margin: 0 0 22px; }
+    label { display: block; text-align: left; font-weight: 600; margin: 14px 0 6px; }
+    input, select {
+      width: 100%;
+      background: #141C2B;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+    input:focus, select:focus { outline: none; border-color: var(--amber); }
+    .btn {
+      border: 0;
+      border-radius: 10px;
+      padding: 12px 16px;
+      background: var(--amber);
+      color: #0B1220;
+      font-weight: 700;
+    }
+    .btn:hover { background: var(--amber-2); }
+    .btn.block { width: 100%; margin-top: 18px; }
+    .btn.ghost, .btn.danger {
+      background: #1A2436;
+      color: var(--text);
+      border: 1px solid var(--line);
+    }
+    .btn.danger { color: var(--danger); }
+    .btn.small { padding: 8px 12px; font-size: 14px; }
+    .error { color: var(--danger); min-height: 1.2em; margin: 10px 0 0; text-align: left; }
+    header.top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 22px;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand img { width: 42px; height: 42px; border-radius: 10px; }
+    .brand h1 { font-size: 22px; margin: 0; }
+    .brand p { margin: 0; color: var(--muted); font-size: 13px; }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
+    .stat { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; }
+    .stat b { display: block; font-size: 28px; color: var(--amber); }
+    .stat span { color: var(--muted); font-size: 13px; }
+    .grid { display: grid; grid-template-columns: 320px 1fr; gap: 16px; align-items: start; }
+    h2 { margin: 0 0 6px; font-size: 18px; }
+    .hint { color: var(--muted); font-size: 13px; margin: 0 0 8px; line-height: 1.45; }
+    .user {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 16px 18px;
+      margin-bottom: 12px;
+    }
+    .user-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+    .user-head strong { font-size: 18px; }
+    .badge { font-size: 12px; font-weight: 700; border-radius: 999px; padding: 4px 10px; }
+    .badge.active { background: #163528; color: var(--ok); }
+    .badge.expired { background: #3A2224; color: var(--danger); }
+    .badge.disabled { background: #2A2430; color: #C7B6D6; }
+    .badge.unset { background: #332A16; color: var(--warn); }
+    .meta { color: var(--muted); font-size: 13px; margin: 8px 0 12px; line-height: 1.5; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+    .row input, .row select { width: auto; flex: 1; min-width: 140px; padding: 8px 10px; }
+    .pass { font-family: Consolas, monospace; }
+    #toast { color: var(--ok); min-height: 1.2em; margin: 8px 0 0; }
+    @media (max-width: 860px) {
+      .stats, .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div id="login" class="login-wrap">
+    <form class="card login-card" id="loginForm">
+      <img class="mark" src="/admin/mark.png" alt="Laneora" />
+      <h1>Laneora</h1>
+      <p class="sub">Admin</p>
+      <label for="dashUser">Username</label>
+      <input id="dashUser" autocomplete="username" required />
+      <label for="dashPass">Password</label>
+      <input id="dashPass" type="password" autocomplete="current-password" required />
+      <p class="error" id="loginError"></p>
+      <button class="btn block" type="submit">Sign in</button>
+    </form>
+  </div>
+
+  <div id="app" class="wrap" hidden>
+    <header class="top">
+      <div class="brand">
+        <img src="/admin/mark.png" alt="" />
+        <div>
+          <h1>Laneora</h1>
+          <p>Users and subscriptions</p>
+        </div>
+      </div>
+      <button class="btn ghost" id="logoutBtn" type="button">Sign out</button>
+    </header>
+    <section class="stats" id="stats"></section>
+    <div class="grid">
+      <form class="card" id="createForm">
+        <h2>New user</h2>
+        <p class="hint">The new login gets the current DAT cookies. The plan starts now.</p>
+        <label for="newUser">Username</label>
+        <input id="newUser" required />
+        <label for="newPass">Password</label>
+        <input id="newPass" required />
+        <label for="newPlan">Plan</label>
+        <select id="newPlan"></select>
+        <p class="error" id="createError"></p>
+        <button class="btn block" type="submit">Create user</button>
+        <h2 style="margin-top:28px">Dashboard password</h2>
+        <p class="hint">This is only for this admin page. It does not change a Soft user named admin.</p>
+        <label for="curDash">Current password</label>
+        <input id="curDash" type="password" />
+        <label for="newDash">New password</label>
+        <input id="newDash" type="password" />
+        <button class="btn ghost block" id="dashPassBtn" type="button">Change password</button>
+        <p id="toast"></p>
+      </form>
+      <section>
+        <h2>All users</h2>
+        <p class="hint">No plan means the account can still log in. After you apply a plan, the next login is refused once the end time has passed. An open Laneora window stays open until they sign in again.</p>
+        <input id="filter" placeholder="Search users" style="margin: 8px 0 14px" />
+        <div id="users"></div>
+      </section>
+    </div>
+  </div>
+  <script>
+    if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+    const $ = (id) => document.getElementById(id);
+    let plans = [];
+    let users = [];
+
+    function esc(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[ch]));
+    }
+
+    function remaining(seconds) {
+      if (seconds == null) return "No end time";
+      if (seconds <= 0) return "Ended";
+      const mins = Math.floor(seconds / 60);
+      if (mins < 90) return mins + " min left";
+      const hours = Math.floor(mins / 60);
+      if (hours < 48) return hours + " hr left";
+      return Math.floor(hours / 24) + " days left";
+    }
+
+    function when(iso) {
+      if (!iso) return "—";
+      const date = new Date(iso);
+      if (Number.isNaN(date.getTime())) return iso;
+      return date.toLocaleString();
+    }
+
+    async function api(path, body) {
+      const res = await fetch(path, {
+        method: body ? "POST" : "GET",
+        headers: body ? { "Content-Type": "application/json" } : {},
+        body: body ? JSON.stringify(body) : undefined
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        const error = new Error(data.error || "Request failed");
+        error.status = res.status;
+        throw error;
+      }
+      return data;
+    }
+
+    function planOptions(selected) {
+      return plans.map((plan) =>
+        `<option value="${esc(plan.id)}"${plan.id === selected ? " selected" : ""}>${esc(plan.label)}</option>`
+      ).join("");
+    }
+
+    function render() {
+      const counts = { total: users.length, active: 0, expired: 0, unset: 0 };
+      users.forEach((user) => { if (counts[user.status] != null) counts[user.status] += 1; });
+      const cards = [
+        ["total", "Users"],
+        ["active", "On a plan"],
+        ["expired", "Expired"],
+        ["unset", "No plan"]
+      ];
+      $("stats").innerHTML = cards.map(([key, label]) =>
+        `<div class="stat"><b>${counts[key]}</b><span>${label}</span></div>`
+      ).join("");
+      const q = $("filter").value.trim().toLowerCase();
+      const shown = users.filter((user) => user.username.toLowerCase().includes(q));
+      $("users").innerHTML = shown.map((user) => `
+        <article class="user" data-user="${esc(user.username)}">
+          <div class="user-head">
+            <strong>${esc(user.username)}</strong>
+            <span class="badge ${esc(user.status)}">${esc(user.status)}</span>
+          </div>
+          <div class="meta">
+            Password <span class="pass">${esc(user.password)}</span><br>
+            ${esc(user.plan_label || "No plan")} · ${esc(remaining(user.remaining_seconds))}<br>
+            Ends ${esc(when(user.subscription_end))} · ${user.cookies} DAT cookies
+          </div>
+          <div class="row">
+            <select data-plan>${planOptions(user.plan || "month_1")}</select>
+            <button class="btn small" type="button" data-act="apply">Apply from now</button>
+            <button class="btn ghost small" type="button" data-act="extend">Add onto current</button>
+          </div>
+          <div class="row">
+            <input data-pass placeholder="New password" />
+            <button class="btn ghost small" type="button" data-act="password">Save password</button>
+            <button class="btn ghost small" type="button" data-act="toggle">${user.active ? "Disable" : "Enable"}</button>
+            <button class="btn danger small" type="button" data-act="delete">Delete</button>
+          </div>
+        </article>
+      `).join("") || `<p class="hint">No users match.</p>`;
+    }
+
+    async function load() {
+      const data = await api("/admin/api/users");
+      plans = data.plans;
+      users = data.users;
+      $("newPlan").innerHTML = planOptions("month_1");
+      render();
+    }
+
+    $("loginForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      $("loginError").textContent = "";
+      try {
+        await api("/admin/api/login", { username: $("dashUser").value, password: $("dashPass").value });
+        showAdmin();
+        await load();
+      } catch (err) {
+        $("loginError").textContent = err.message;
+      }
+    });
+
+    $("logoutBtn").addEventListener("click", async () => {
+      await api("/admin/api/logout", {});
+      location.reload();
+    });
+
+    $("filter").addEventListener("input", render);
+
+    $("createForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      $("createError").textContent = "";
+      try {
+        await api("/admin/api/users", {
+          username: $("newUser").value,
+          password: $("newPass").value,
+          plan: $("newPlan").value
+        });
+        $("newUser").value = "";
+        $("newPass").value = "";
+        $("toast").textContent = "User created.";
+        await load();
+      } catch (err) {
+        $("createError").textContent = err.message;
+      }
+    });
+
+    $("dashPassBtn").addEventListener("click", async () => {
+      $("toast").textContent = "";
+      $("createError").textContent = "";
+      try {
+        await api("/admin/api/password", { current: $("curDash").value, password: $("newDash").value });
+        $("curDash").value = "";
+        $("newDash").value = "";
+        $("toast").textContent = "Dashboard password changed.";
+      } catch (err) {
+        $("createError").textContent = err.message;
+      }
+    });
+
+    function showAdmin() {
+      $("login").hidden = true;
+      $("app").hidden = false;
+      const top = () => window.scrollTo(0, 0);
+      top();
+      requestAnimationFrame(top);
+      setTimeout(top, 50);
+    }
+
+    api("/admin/api/users").then((data) => {
+      plans = data.plans;
+      users = data.users;
+      showAdmin();
+      $("newPlan").innerHTML = planOptions("month_1");
+      render();
+    }).catch(() => {});
+
+    $("users").addEventListener("click", async (event) => {
+      const button = event.target.closest("button");
+      if (!button) return;
+      const card = button.closest(".user");
+      const username = card.dataset.user;
+      const act = button.dataset.act;
+      const plan = card.querySelector("[data-plan]").value;
+      const password = card.querySelector("[data-pass]").value;
+      try {
+        if (act === "delete") {
+          if (!confirm("Delete " + username + "?")) return;
+          await api("/admin/api/users/delete", { username });
+        } else if (act === "toggle") {
+          const user = users.find((item) => item.username === username);
+          await api("/admin/api/users/update", { username, active: !user.active });
+        } else if (act === "password") {
+          await api("/admin/api/users/update", { username, password });
+          card.querySelector("[data-pass]").value = "";
+        } else if (act === "apply" || act === "extend") {
+          await api("/admin/api/users/update", { username, plan, extend: act === "extend" });
+        }
+        $("toast").textContent = "Saved.";
+        await load();
+      } catch (err) {
+        $("toast").textContent = "";
+        alert(err.message);
+      }
+    });
+  </script>
+</body>
+</html>

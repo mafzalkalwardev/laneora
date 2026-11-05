@@ -19,6 +19,8 @@ if (-not (Test-Path .\.venv\Scripts\python.exe)) {
   --add-data "app\resources\mark.png;app\resources" `
   --add-data "app\resources\app.ico;app\resources" `
   --hidden-import PyQt5.QtWebEngineWidgets `
-  -m app.main
+  --hidden-import PyQt5.QtWebEngineCore `
+  "app\main.py"
 
 Write-Host "Built dist\Laneora.exe"
+Write-Host "Give clients: dist\Laneora.exe + CLIENT_INSTALL.md shortcut bat"

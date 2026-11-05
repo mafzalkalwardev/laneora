@@ -8,6 +8,12 @@ __pycache__/
 .env.*
 !.env.example
 data/users.local.json
+data/dat_cookies_captured.json
+data/_p1_cookies
+data/_p1_localstorage_hits.json
+data/_verify_dat_*
+data/laneora_login_attempt.png
+artifacts/
 build/
 dist/
 *.spec

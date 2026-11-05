@@ -7,11 +7,17 @@ QMainWindow, QWidget {
     background-color: #0B1220;
 }
 
+QWidget#loginCard {
+    background-color: #121A2A;
+    border: 1px solid #2A364A;
+    border-radius: 20px;
+}
+
 QLabel#brandTitle {
-    font-size: 34px;
+    font-size: 32px;
     font-weight: 700;
     color: #F5A524;
-    letter-spacing: 1px;
+    letter-spacing: 0.5px;
 }
 
 QLabel#brandSubtitle {

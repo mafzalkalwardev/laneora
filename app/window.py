@@ -8,14 +8,10 @@ import threading
 from typing import Any
 
 import psutil
-import requests
-from PyQt5.QtCore import Qt, QUrl
-from PyQt5.QtGui import QFont, QIcon, QPixmap
+from PyQt5.QtCore import Qt, QTimer, QUrl
+from PyQt5.QtGui import QIcon, QPixmap
 from PyQt5.QtWidgets import (
-    QAction,
     QApplication,
-    QComboBox,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -32,7 +28,7 @@ from app import APP_NAME, PASSPHRASE, POWER_DAT, SERVER_URL, SPEEDTEST_URL, __ve
 from app.auth import AuthError, AuthSession, authenticate, reauthenticate, start_logger_heartbeat
 from app.browser import apply_cookies, attach_checker_script, clear_profile, inject_local_storage
 from app.crypto_util import decrypt
-from app.roster import load_roster, upsert_user
+from app.roster import upsert_user
 from app.streams import apply_http_proxy
 from app.timezone_util import sync_timezone_from_ip
 
@@ -72,9 +68,13 @@ class MainWindow(QMainWindow):
         self.tabs: QTabWidget | None = None
         self.cookieStore = None
 
-        icon_path = resource_path("app.ico")
-        if os.path.exists(icon_path):
-            self.setWindowIcon(QIcon(icon_path))
+        for name in ("mark.png", "logo.png", "app.ico"):
+            icon_path = resource_path(name)
+            if os.path.exists(icon_path):
+                icon = QIcon(icon_path)
+                if not icon.isNull():
+                    self.setWindowIcon(icon)
+                    break
         self.setWindowTitle(f"{APP_NAME} v{__version__}")
         self.resize(980, 720)
 
@@ -87,87 +87,56 @@ class MainWindow(QMainWindow):
 
     def _build_login(self) -> None:
         self.remove_all_widgets()
-        self._roster = load_roster()
+        self.layout.addStretch(1)
 
-        logo_box = QHBoxLayout()
+        card = QWidget()
+        card.setObjectName("loginCard")
+        card.setFixedWidth(420)
+        form = QVBoxLayout(card)
+        form.setContentsMargins(36, 32, 36, 32)
+        form.setSpacing(10)
+
         logo_label = QLabel()
+        logo_label.setAlignment(Qt.AlignCenter)
         mark = resource_path("mark.png")
         if os.path.exists(mark):
-            pix = QPixmap(mark).scaledToWidth(96, Qt.SmoothTransformation)
+            pix = QPixmap(mark).scaled(96, 96, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             logo_label.setPixmap(pix)
-        logo_box.addWidget(logo_label)
-        logo_box.addStretch(1)
-        self.layout.addLayout(logo_box)
+        form.addWidget(logo_label)
 
         title = QLabel(APP_NAME)
         title.setObjectName("brandTitle")
-        self.layout.addWidget(title)
-        sub = QLabel(f"Auth + streams from {SERVER_URL}")
-        sub.setObjectName("brandSubtitle")
-        self.layout.addWidget(sub)
+        title.setAlignment(Qt.AlignCenter)
+        form.addWidget(title)
+        form.addSpacing(14)
 
-        roster_label = QLabel("Injected soft users:")
-        roster_label.setObjectName("fieldLabel")
-        self.layout.addWidget(roster_label)
-        self.roster_combo = QComboBox()
-        self.roster_combo.addItem("— type credentials manually —", None)
-        for user in self._roster:
-            display = user.get("label") or user["username"]
-            self.roster_combo.addItem(display, user)
-        self.roster_combo.currentIndexChanged.connect(self._on_roster_selected)
-        self.layout.addWidget(self.roster_combo)
-
-        user_label = QLabel("Username:")
+        user_label = QLabel("Username")
         user_label.setObjectName("fieldLabel")
-        self.layout.addWidget(user_label)
+        form.addWidget(user_label)
         self.username_edit = QLineEdit()
-        self.username_edit.setPlaceholderText("soft.awwthat.com username")
-        self.layout.addWidget(self.username_edit)
+        self.username_edit.setPlaceholderText("Username")
+        form.addWidget(self.username_edit)
+        form.addSpacing(6)
 
-        pass_label = QLabel("Password:")
+        pass_label = QLabel("Password")
         pass_label.setObjectName("fieldLabel")
-        self.layout.addWidget(pass_label)
+        form.addWidget(pass_label)
         self.password_edit = QLineEdit()
         self.password_edit.setEchoMode(QLineEdit.Password)
-        self.password_edit.setPlaceholderText("soft.awwthat.com password")
-        self.layout.addWidget(self.password_edit)
+        self.password_edit.setPlaceholderText("Password")
+        form.addWidget(self.password_edit)
+        self.username_edit.returnPressed.connect(self.password_edit.setFocus)
+        self.password_edit.returnPressed.connect(self.login)
+        form.addSpacing(12)
 
         self.login_button = QPushButton("Login")
+        self.login_button.setDefault(True)
+        self.login_button.setCursor(Qt.PointingHandCursor)
         self.login_button.clicked.connect(self.login)
-        self.layout.addWidget(self.login_button)
+        form.addWidget(self.login_button)
 
-        self.save_roster_button = QPushButton("Save current to roster")
-        self.save_roster_button.setObjectName("secondaryButton")
-        self.save_roster_button.clicked.connect(self._save_current_to_roster)
-        self.layout.addWidget(self.save_roster_button)
+        self.layout.addWidget(card, alignment=Qt.AlignHCenter)
         self.layout.addStretch(1)
-
-        version_line = QLabel(
-            f"{APP_NAME} v{__version__} · inject users: python scripts/add_user.py user pass"
-        )
-        version_line.setObjectName("brandSubtitle")
-        self.layout.addWidget(version_line)
-
-    def _on_roster_selected(self, _index: int) -> None:
-        user = self.roster_combo.currentData()
-        if not user:
-            return
-        self.username_edit.setText(user.get("username", ""))
-        self.password_edit.setText(user.get("password", ""))
-
-    def _save_current_to_roster(self) -> None:
-        username = self.username_edit.text().strip()
-        password = self.password_edit.text().strip()
-        if not username or not password:
-            QMessageBox.warning(self, "Error", "Enter username and password first.")
-            return
-        upsert_user(username, password)
-        QMessageBox.information(self, "Saved", f"Added '{username}' to local roster.")
-        # refresh dropdown without clearing typed fields
-        current_user, current_pass = username, password
-        self._build_login()
-        self.username_edit.setText(current_user)
-        self.password_edit.setText(current_pass)
 
     def kill_proc_tree(self, pid: int | None = None, including_parent: bool = True) -> None:
         pid = pid or os.getpid()
@@ -204,15 +173,8 @@ class MainWindow(QMainWindow):
             upsert_user(session.username, self.password_edit.text().strip() or session.password)
         except Exception as exc:  # noqa: BLE001
             print("roster save:", exc)
-        QMessageBox.information(
-            self,
-            "Success",
-            "Login Successful - Connecting to High Speed Network Pool . . . . ",
-        )
-        self.setWindowTitle(
-            f"{APP_NAME} v{__version__} — Connection line : {session.resp.get('p')} "
-            f"- Stream : {session.resp.get('active_subs')}"
-        )
+        QMessageBox.information(self, "Success", "Login Successful")
+        self.setWindowTitle(f"{APP_NAME} v{__version__} — DAT One")
         start_logger_heartbeat(session, self._on_multi_screen, self._stop_logger)
         self.show_select_screen(session)
 
@@ -244,21 +206,26 @@ class MainWindow(QMainWindow):
         self.remove_all_widgets()
         resp = session.resp
         px, p, pu, pd = session.proxy_host, session.proxy_port, session.proxy_user, session.proxy_password
+        blob = resp.get("one")
+        if not blob:
+            QMessageBox.warning(self, "Error", "DAT One stream is not on this account.")
+            self._build_login()
+            return
 
-        ipinfo = QPushButton("IP Info")
-        ipinfo.setObjectName("secondaryButton")
-        ipinfo.clicked.connect(lambda: self.browse(_IPINFO_BLOB, px, p, pu, pd, "", 0))
-        self.layout.addWidget(ipinfo)
-
-        for opt in session.active_subs:
-            btn = QPushButton(f"Load Stream: {opt}")
-            btn.setObjectName("streamButton")
-            # resp[opt] is encrypted payload for that stream
-            btn.clicked.connect(
-                lambda _checked=False, o=opt: self.browse(resp[o], px, p, pu, pd, o, 1)
-            )
-            self.layout.addWidget(btn, alignment=Qt.AlignBottom)
-
+        self.layout.addStretch(1)
+        btn = QPushButton("Load DAT Stream")
+        btn.setObjectName("streamButton")
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.clicked.connect(
+            lambda _checked=False: self.browse(blob, px, p, pu, pd, "one", 1)
+        )
+        holder = QWidget()
+        holder.setFixedWidth(420)
+        holder_layout = QVBoxLayout(holder)
+        holder_layout.setContentsMargins(0, 0, 0, 0)
+        holder_layout.addWidget(btn)
+        self.layout.addWidget(holder, alignment=Qt.AlignHCenter)
+        self.layout.addStretch(1)
         self.showMaximized()
 
     def browse(self, br: str, px, p, pu, pd, opt: str, fc: int = 0) -> None:
@@ -267,8 +234,7 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.layout.addWidget(self.tabs)
         self.tabs.setDocumentMode(True)
-        self.tabs.setTabsClosable(True)
-        self.tabs.tabCloseRequested.connect(self.close_current_tab)
+        self.tabs.tabBar().hide()
 
         px, pu, pd = str(px), str(pu), str(pd)
         p = int(p)
@@ -278,39 +244,6 @@ class MainWindow(QMainWindow):
             threading.Thread(target=self._timezone_worker, daemon=True).start()
 
         full_make = json.loads(decrypt(PASSPHRASE, br))
-        navtb = QToolBar("NavTb")
-        try:
-            linetext = requests.get(SERVER_URL + "/linetext", timeout=20)
-            mylabel = QLabel(linetext.text)
-        except Exception:  # noqa: BLE001
-            mylabel = QLabel("")
-        mylabel.setStyleSheet("QLabel { font-size: 18px; }")
-        mylabel.setFont(QFont("Arial", 10))
-
-        load_btn = QAction("Reconnect!", self)
-        load_btn.setStatusTip("Search New Load")
-        load_btn.triggered.connect(lambda: self.stream_again(opt))
-        navtb.addAction(load_btn)
-
-        reload_btn = QAction("Start Service", self)
-        reload_btn.setStatusTip("Load new Tab")
-        reload_btn.triggered.connect(lambda: self.new_tab(full_make, opt))
-        navtb.addAction(reload_btn)
-
-        speedtest_btn = QAction("SpeedTest", self)
-        speedtest_btn.setStatusTip("Test Connection Speed")
-        speedtest_btn.triggered.connect(self.speedtest)
-        navtb.addAction(speedtest_btn)
-        navtb.addWidget(mylabel)
-        navtb.addSeparator()
-        self.addToolBar(navtb)
-
-        debug_info = QToolBar("Debug Info")
-        debug_info.addWidget(
-            QLabel(f"Support Info : Connection line : {p} - Stream : {opt}")
-        )
-        self.addToolBar(debug_info)
-
         self.make_tab(full_make, opt)
 
     def _timezone_worker(self) -> None:
@@ -339,7 +272,12 @@ class MainWindow(QMainWindow):
         if "power" in (opt or "").lower():
             self.url = POWER_DAT
         else:
-            self.url = str(full_make.get("url") or POWER_DAT)
+            raw = str(full_make.get("url") or "")
+            # DAT One opens Search Loads only. Other side tabs stay hidden via the checker.
+            if "one.dat.com" in raw:
+                self.url = "https://one.dat.com/search-loads"
+            else:
+                self.url = raw or "https://one.dat.com/search-loads"
 
         self.store = list(full_make.get("store") or [])
         self.lst = full_make.get("lst") or "{}"
@@ -349,11 +287,21 @@ class MainWindow(QMainWindow):
 
         profile = self.browser.page().profile()
         self.cookieStore = profile.cookieStore()
+        # deleteAllCookies is async. Setting cookies in the same turn gets wiped
+        # and DAT stays on a blank page. Apply the session after the delete runs.
         self.cookieStore.deleteAllCookies()
         clear_profile(profile)
-        apply_cookies(self.cookieStore, self.store)
+        url = self.url
+        store = list(self.store)
+        cookie_store = self.cookieStore
 
-        self.browser.load(QUrl(self.url))
+        def _open_stream() -> None:
+            if self.browser is None:
+                return
+            apply_cookies(cookie_store, store)
+            self.browser.load(QUrl(url))
+
+        QTimer.singleShot(400, _open_stream)
         i = self.tabs.addTab(self.browser, "Screen")
         self.tabs.setCurrentIndex(i)
 

@@ -8,6 +8,10 @@ if not exist ".venv\Scripts\python.exe" (
   ".venv\Scripts\python.exe" scripts\make_brand.py
 )
 
-REM Auth/streams come from soft.awwthat.com by default.
-REM Inject soft test accounts first:  .venv\Scripts\python.exe scripts\add_user.py USER PASS
+REM Local Soft shim (Start Soft Server.bat must be running).
+set LANEORA_SERVER_URL=http://127.0.0.1:8787
+set LANEORA_SOFT_FALLBACK_URL=http://127.0.0.1:8787
+set LANEORA_SOFT_FALLBACK=1
+set LANEORA_SKIP_UPDATE=1
+
 ".venv\Scripts\python.exe" -m app

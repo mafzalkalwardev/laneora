@@ -9,76 +9,64 @@ from PyQt5.QtWebEngineWidgets import QWebEngineProfile, QWebEngineScript, QWebEn
 
 from app import USER_AGENT
 
+# Proven on the shared DAT session: hide the side menu (Search Loads only)
+# and remove DAT's "logged in on another device" dialog. Do not click Login Anyway.
 CHECKER_SCRIPT = """
                 function remover() {
-                    var ob1 = document.getElementsByClassName('ui-dialog ui-widget ui-widget-content ui-corner-all ui-front usurpModal')[0];
-                    var ob2 = document.getElementsByClassName('ui-widget-overlay ui-front')[0];
-                    var ob3 = document.getElementsByClassName('cdk-overlay-backdrop cdk-overlay-dark-backdrop cdk-overlay-backdrop-showing')[0];
-                    var ob4 = document.getElementsByClassName('mat-dialog-container ng-tns-c45-0 ng-trigger ng-trigger-dialogContainer ng-star-inserted')[0];
-                    var ob5 = document.getElementsByClassName('mat-dialog-container ng-tns-c42-9 ng-trigger ng-trigger-dialogContainer ng-star-inserted')[0];
-                    var ob6 = document.getElementsByClassName('mat-dialog-container ng-tns-c42-36 ng-trigger ng-trigger-dialogContainer ng-star-inserted')[0];
-                    var ob7 = document.getElementsByClassName('cdk-overlay-backdrop cdk-overlay-dark-backdrop cdk-overlay-backdrop-showing')[0];
-                    var ob8 = document.getElementsByClassName('mat-dialog-container ng-trigger ng-trigger-dialogContainer ng-star-inserted')[0];
-                    var ob9 = document.getElementsByClassName('nav-links')[0];
-                    var ob10 = document.getElementsByTagName('dat-worklist-controls')[0];
-
-                    [...document.querySelectorAll('*')].forEach(el => {
-                        if (el.textContent.trim().toLowerCase() === 'book') {
+                    if (!document.getElementById('laneora-soft-hide')) {
+                        var css = document.createElement('style');
+                        css.id = 'laneora-soft-hide';
+                        css.textContent = [
+                            '.nav-links,dat-worklist-controls,dat-certificate-of-insurance-banner,.certificate-banner-container,',
+                            'connected-email-connect-cta,connected-email-connect-button,connected-email-connect-modal,',
+                            'dat-load-details .mat-icon:empty,dat-load-details mat-icon:empty,',
+                            '.expanded-detail-row .mat-icon:empty,.expanded-detail-row mat-icon:empty,',
+                            '.table-row-detail .mat-icon:empty,.details-container .mat-icon:empty,',
+                            'dat-load-details img[src=""],dat-load-details img:not([src]),',
+                            '.origin-destination mat-icon,.route-arrow,.trip-arrow',
+                            '{display:none!important;width:0!important;height:0!important;overflow:hidden!important;}'
+                        ].join('');
+                        (document.head || document.documentElement).appendChild(css);
+                    }
+                    if (location.hostname === 'one.dat.com') {
+                        var path = location.pathname || '/';
+                        var other = /\\/(dashboard|company|my-company|my-trucks|my-loads|private-network|tools|notifications|my-account|support)(\\/|$)/i;
+                        if (path.indexOf('/search-loads') !== 0 && other.test(path)) {
+                            var now = Date.now();
+                            if (!window.__laneoraHop || now - window.__laneoraHop > 8000) {
+                                window.__laneoraHop = now;
+                                location.replace('https://one.dat.com/search-loads');
+                                return;
+                            }
+                        }
+                    }
+                    document.querySelectorAll(
+                        '.nav-links, dat-worklist-controls, dat-certificate-of-insurance-banner, .certificate-banner-container, connected-email-connect-cta, connected-email-connect-button, connected-email-connect-modal'
+                    ).forEach(function (el) {
+                        el.remove();
+                    });
+                    document.querySelectorAll('a, button').forEach(function (el) {
+                        var t = (el.textContent || '').trim().toLowerCase();
+                        if (t === 'book' || t === 'book load' || t === 'prefer' || t === 'block' || t === 'connect email' || t === 'sign in with microsoft' || t === 'sign in with google') {
                             el.remove();
                         }
                     });
-
-                    [...document.querySelectorAll('*')].forEach(el => {
-                        if (el.textContent.trim().toLowerCase() === 'book load') {
+                    var oops = /logged in on another device|login anyway/i;
+                    document.querySelectorAll(
+                        '.usurpModal, .ui-widget-overlay, .cdk-overlay-backdrop, .cdk-overlay-pane, .mat-dialog-container'
+                    ).forEach(function (el) {
+                        var t = el.innerText || '';
+                        if (
+                            oops.test(t) ||
+                            el.classList.contains('cdk-overlay-backdrop') ||
+                            el.classList.contains('usurpModal') ||
+                            el.classList.contains('ui-widget-overlay')
+                        ) {
                             el.remove();
                         }
                     });
-
-                    [...document.querySelectorAll('*')].forEach(el => {
-                        if (el.textContent.trim().toLowerCase() === 'prefer') {
-                            el.remove();
-                        }
-                    });
-
-                    [...document.querySelectorAll('*')].forEach(el => {
-                        if (el.textContent.trim().toLowerCase() === 'block') {
-                            el.remove();
-                        }
-                    });
-
-
-                    if (ob1) {
-                        ob1.remove();
-                    }
-                    if (ob2) {
-                        ob2.remove();
-                    }
-                    if (ob3) {
-                        ob3.remove();
-                    }
-                    if (ob4) {
-                        ob4.remove();
-                    }
-                    if (ob5) {
-                        ob5.remove();
-                    }
-                    if (ob6) {
-                        ob6.remove();
-                    }
-                    if (ob7) {
-                        ob7.remove();
-                    }
-                    if (ob8) {
-                        ob8.remove();
-                    }
-                    if (ob9) {
-                        ob9.remove();
-                    }
-                    if (ob10) {
-                        ob10.remove();
-                    }
                 }
-                setInterval(remover, 100);
+                setInterval(remover, 150);
                 """
 
 
@@ -97,10 +85,19 @@ def apply_cookies(cookie_store, store: list[dict[str, Any]]) -> None:
         qcookie.setValue(str(cookie.get("value", "")).encode())
         qcookie.setDomain(str(cookie.get("domain", "")))
         qcookie.setPath(str(cookie.get("path", "")))
-        expiration_date_str = str(cookie.get("expirationDate", "") or "")
-        if expiration_date_str:
-            expiration_date = QDateTime.fromString(expiration_date_str, Qt.ISODate)
-            qcookie.setExpirationDate(expiration_date)
+        raw_exp = cookie.get("expirationDate", "") or ""
+        if isinstance(raw_exp, (int, float)) or (
+            isinstance(raw_exp, str) and raw_exp.replace(".", "", 1).isdigit()
+        ):
+            secs = int(float(raw_exp))
+            if secs > 10_000_000_000:
+                secs //= 1000
+            if secs > 0:
+                qcookie.setExpirationDate(QDateTime.fromSecsSinceEpoch(secs))
+        else:
+            expiration_date = QDateTime.fromString(str(raw_exp), Qt.ISODate)
+            if expiration_date.isValid():
+                qcookie.setExpirationDate(expiration_date)
         qcookie.setHttpOnly(bool(cookie.get("httpOnly", False)))
         qcookie.setSecure(bool(cookie.get("secure", False)))
         cookie_store.setCookie(qcookie, QUrl())

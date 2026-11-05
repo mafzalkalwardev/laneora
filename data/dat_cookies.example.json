@@ -1,0 +1,15 @@
+{
+  "url": "https://one.dat.com",
+  "lst": "{}",
+  "sst": "",
+  "store": [
+    {
+      "name": "example_cookie",
+      "value": "replace_with_real_dat_session_cookie",
+      "domain": ".dat.com",
+      "path": "/",
+      "secure": true,
+      "httpOnly": true
+    }
+  ]
+}
