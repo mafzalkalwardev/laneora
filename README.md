@@ -1,21 +1,20 @@
 <div align="center">
 
-<img src="app/resources/logo.png" alt="Laneora logo" width="220" />
+<img src="app/resources/mark.png" alt="Laneora icon, amber lanes on a dark rounded square" width="96" />
 
 # Laneora
 
-**DAT load-board stream client for truck dispatch teams**
+**Windows desktop client for shared freight-board access, with an admin desk for users and plans**
 
-Windows desktop app for DAT One. Clients sign in with a Soft username, then open Search Loads. You manage those logins and their plans from the admin dashboard.
+Dispatchers sign in with a Laneora username. The app opens the load search already signed in. An admin creates those usernames, sets how long they last, and keeps one board session for every client.
 
 [![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![PyQt5](https://img.shields.io/badge/UI-PyQt5%20WebEngine-41CD52?logo=qt&logoColor=white)](https://www.riverbankcomputing.com/software/pyqt/)
 [![Platform](https://img.shields.io/badge/Platform-Windows-0078D4?logo=windows&logoColor=white)](#setup-windows)
 [![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/mafzalkalwardev/laneora)
 [![Release](https://img.shields.io/badge/Release-v3.0.0-F5A524)](https://github.com/mafzalkalwardev/laneora/releases)
-[![GitHub](https://img.shields.io/badge/GitHub-Public-181717?logo=github)](https://github.com/mafzalkalwardev/laneora)
 
-[Features](#features) · [Quick start](#setup-windows) · [Admin](#admin-dashboard) · [Client](#client-login)
+[How it works](#how-the-whole-system-works) · [Admin](#admin-dashboard) · [Client](#client-sign-in) · [Techniques](#techniques) · [Setup](#setup-windows)
 
 </div>
 
@@ -23,24 +22,138 @@ Windows desktop app for DAT One. Clients sign in with a Soft username, then open
 
 ## Why Laneora?
 
-Laneora is a Windows client for dispatch teams who work **DAT One Search Loads**. The client does not ask for a DAT username. It signs in to the Laneora Soft server, receives the shared DAT session, and opens Search Loads.
+Laneora is a dispatch desktop app. The person at the client PC never types a board username or password. They type the Laneora username an admin created. The Soft server checks that login, checks the plan, and hands back one shared board session. The window then opens the load search inside an embedded browser.
 
-You run the Soft server on your PC (or later on a VPS). The admin dashboard on that server is where you create users and set how long they can sign in.
+The admin desk is a web page on the same server. From there you create users, set a plan, extend time, change a password, disable an account, or delete it. There is no seat cap. The same username cannot stay open on two Laneora windows at once.
 
 **Repository:** https://github.com/mafzalkalwardev/laneora
 
 ---
 
-## Features
+## How the whole system works
 
-| Area | What you get |
-|------|----------------|
-| Client | Centered login, then one **Load DAT Stream** button for DAT One Search Loads |
-| Soft server | `Start Soft Server.bat` — auth, heartbeat, and the shared DAT cookie session on port 8787 |
-| Admin | Browser dashboard to create users, set passwords, and turn accounts on or off |
-| Plans | Trial 1 hour, 1 day, 1 week, 15 days, 1 month, 3 months, 6 months, 1 year |
-| Session | DAT cookies are pushed to every Soft user. The client does not log in to DAT itself |
-| Screen | One Laneora window per Soft username. Side menu, COI banner, and Connect Email are hidden |
+Three pieces have to be up. They are not the same window.
+
+| Piece | What it is | What happens if it stops |
+| --- | --- | --- |
+| Soft server | `Start Soft Server.bat` on the admin PC, port 8787 | New client logins fail. A search page that is already open stays open and retries. |
+| Admin dashboard | Browser page at `/admin` on that server | You cannot create or change users until you open it again. Clients are not affected. |
+| Laneora window | The desktop app on each dispatcher PC | Only that one screen closes. Other PCs keep working. |
+
+```text
+Admin PC                         Dispatcher PC
+-----------                      --------------
+Soft server  <---- login ----   Laneora window
+   |                               |
+   | users, plans, session         | embedded browser
+   v                               v
+Admin dashboard                 Load search
+```
+
+### 1. The server stays up
+
+Double-click `Start Soft Server.bat`. It listens on `0.0.0.0:8787`. Clients connect to this PC’s LAN address, for example `http://192.168.1.20:8787`. They must not use `0.0.0.0`, and another PC cannot use `127.0.0.1`.
+
+Closing the Laneora window does not stop the server. Sleep, shutdown, or closing the server window does. A page that is already open keeps retrying the once-a-minute check. When the server is back, that check succeeds again.
+
+### 2. The admin creates a user and a plan
+
+Open `http://127.0.0.1:8787/admin` and sign in. The login card leaves the page. The user list is the page.
+
+<img src="docs/images/admin-login.png" alt="Laneora admin sign-in, centered icon, username, password, and Sign in" width="720" />
+
+Create a username, a password, and a plan. The plan starts at that moment. A new account also receives the board session that was last captured on the admin PC, so the dispatcher can open the search without a board login.
+
+Plans:
+
+| Plan | Length |
+| --- | --- |
+| Trial | 1 hour |
+| Day | 1 day |
+| Week | 7 days |
+| 15 days | 15 days |
+| Month | 30 days |
+| 3 months | 90 days |
+| 6 months | 180 days |
+| Year | 365 days |
+
+**Apply from now** replaces the clock and starts the chosen plan immediately. **Add onto current** adds that same length onto time that is still left. If the plan has already ended, add-on starts from now.
+
+Accounts that have never been given a plan can still sign in. The clock starts only when you apply one. After the end time, the next Laneora login is refused. A window that is already open stays open until that person signs in again.
+
+<img src="docs/images/admin-users.png" alt="Laneora admin desk with user counts, a new-user form, and subscription controls for each user" width="900" />
+
+You can also change a user’s password, disable the account, or delete it. Disabling blocks the next login even if time is left. Deleting removes the Soft login. The dashboard password is separate from any client user, including a client user named admin.
+
+### 3. The dispatcher signs in
+
+The client window shows the Laneora icon, the name, username, password, and Login. Nothing else.
+
+<img src="docs/images/client-login.png" alt="Laneora client sign-in with the icon centered above username, password, and Login" width="720" />
+
+A correct login shows **Login Successful**. The next screen has one button, which opens the load search. The app does not offer a second board product.
+
+On a dispatcher PC, run `dist\Laneora.exe` from `dist\Laneora Soft.bat`. The bat sets the server address. On this LAN that address is `http://192.168.1.20:8787`. If the admin PC cannot be reached, the client does not start an empty local server of its own.
+
+### 4. The shared session opens the search
+
+At login the server returns an encrypted session blob. Laneora decrypts it, writes the cookies into the embedded browser, and opens the search page. The dispatcher does not type a board password.
+
+Every client PC must leave through the same static US address as the PC that captured the session. Laneora does not assign that address itself when the shared proxy is `none`. A static-IP VPN on each PC is what keeps the board looking at one egress address. If a PC uses a different public address, the board can reject the session.
+
+Do not confirm a prompt that would sign the other computer out. That drops the shared session for everyone.
+
+### 5. One screen per username
+
+After login, the client calls the server about once a minute. With single-screen mode on, the newest Laneora window for that username wins. An older window is told to exit. Extra Chrome windows are not Laneora users. They do not count as a second screen, and they do not get their own board login.
+
+### 6. When something expires
+
+| What ended | What the dispatcher sees | What you do |
+| --- | --- | --- |
+| The plan’s end time | The next login is refused | Apply a plan again, or add time, from the admin desk |
+| The account was disabled | The next login is refused | Enable the user |
+| The board session went stale | The search asks for a board login, or the page fails to settle | Capture the session again on the admin PC and push it to every user |
+| The Soft server is down | A new login cannot connect. An open search stays up and retries | Start `Start Soft Server.bat` again |
+
+Refreshing cookies is still a capture on the admin PC while the static IP is on, then a push to all users. Clients pick up the new session the next time they sign in.
+
+---
+
+## Client sign-in
+
+1. Same static US egress address as the admin PC.
+2. Soft server running on the admin PC.
+3. Laneora Soft username and password from the admin desk.
+4. Login, then the single button that opens the load search.
+
+Operator notes for handing a PC to someone are in `CLIENT_INSTALL.md`. Day-to-day server commands are in `ADMIN_OPS.md`.
+
+---
+
+## Techniques
+
+This is the stack behind the workflow above.
+
+| Technique | Where it is used |
+| --- | --- |
+| PyQt5 and Qt WebEngine | The client UI and the embedded Chromium window that shows the load search |
+| Soft-compatible HTTP API | `GET /authenticate` checks the username, password, plan, and returns the encrypted session. `GET /logger` is the once-a-minute screen check |
+| Subscription clock | Plan start and end are stored in UTC on the account. Login is refused when the end time has passed or the account is disabled |
+| OpenSSL-compatible AES payload | The session blob is `Salted__` AES, decrypted in the client before cookies are applied |
+| Cookie restore | Cookie expiry from the capture is unix time, written into the WebEngine cookie store, then the search URL loads |
+| Document script | After the page starts, a script keeps the view on the search route and hides the side menu, insurance banner, and mailbox connect button |
+| Single-screen heartbeat | The server remembers the newest login for that username and answers the older window with a failed check |
+| Explicit Windows app id | The taskbar icon is the Laneora mark, set before the first window, instead of the Python icon |
+| PyInstaller onefile build | `build.ps1` produces `dist\Laneora.exe` with the mark as the program icon |
+
+A shared HTTP proxy is optional. If you set one, every account receives the same proxy host on the next login, and the board sees that proxy’s egress address instead of each PC’s own address.
+
+```powershell
+python scripts\soft_admin.py set-proxy PROXY_HOST PROXY_PORT PROXY_USER PROXY_PASS
+python scripts\soft_admin.py check-ip
+python scripts\soft_admin.py status
+```
 
 ---
 
@@ -52,169 +165,63 @@ py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 python scripts\make_brand.py
-python -m app
 ```
 
-Or double-click `Start Soft Server.bat`, then `Start Laneora.bat`.
+Then start the server, then the client:
+
+```powershell
+.\Start Soft Server.bat
+.\Start Laneora.bat
+```
 
 **Requirements:** Windows 10/11, Python 3.12+.
 
----
+The first server start writes a dashboard login into `data/soft_config.json` under `dashboard`. Change that password on the admin page. It does not change a client user.
 
-## Admin dashboard
-
-With the Soft server running, open:
-
-- This PC: http://127.0.0.1:8787/admin
-- Another PC on the same network: `http://YOUR_LAN_IP:8787/admin`
-
-Sign in with the dashboard username and password from `data/soft_config.json` (`dashboard`). The first run creates `admin` / `admin123` if that block is missing. Changing it here does not change a Soft client user who happens to be named admin.
-
-From the dashboard:
-
-1. Create a username, password, and plan. The new account receives the DAT cookies in `data/dat_cookies_captured.json`.
-2. **Apply from now** starts that plan immediately.
-3. **Add onto current** adds the same length onto time still left.
-4. Disable, change the password, or delete the user.
-
-Accounts with no plan can still log in. After a plan’s end time, the next Laneora login is refused. A window that is already open stays open until that user signs in again.
-
-There is no account cap. The same Soft username cannot stay open on two Laneora screens at once.
-
----
-
-## Client login
-
-The Laneora window shows the logo, the name, username, password, and Login. After a correct Soft login the dialog says **Login Successful**, then one button: **Load DAT Stream**.
-
-Client machines use `dist\Laneora.exe` with `dist\Laneora Soft.bat`. That bat must point at the PC running the Soft server, for example `http://192.168.1.20:8787`. Each client PC needs the same Surfshark static US IP as the machine that captured the DAT cookies. Do not click **Login Anyway** on DAT.
-
----
-
-## Same IP on many PCs
-
-Every client PC uses the same Surfshark static US IP before opening DAT. With that, Soft `px` stays `none` and DAT sees the static IP.
-
-A shared HTTP proxy is optional. If you have one, Soft can send it to every account:
-
-```powershell
-# Allow same Soft user on many PCs (no "Multiple Screens not allowed")
-python scripts\soft_admin.py multi-screen on
-
-# Point ALL Soft accounts at one shared proxy (required for same IP)
-python scripts\soft_admin.py set-proxy PROXY_HOST PROXY_PORT PROXY_USER PROXY_PASS
-
-# Confirm what DAT would see
-python scripts\soft_admin.py check-ip
-
-# Soft account + import a DAT cookie jar (optional; see data/dat_cookies.example.json)
-python scripts\soft_admin.py add-user dispatcher1 secret
-python scripts\soft_admin.py import-store dispatcher1 one data\dat_cookies.json
-
-python scripts\soft_admin.py status
-```
-
-Config: [`data/soft_config.json`](data/soft_config.json) · accounts: [`data/local_users.json`](data/local_users.json)
-
-Without the shared Surfshark IP, or without a real proxy, each PC shows its own public IP to DAT.  
-
----
-
-## Soft server
-
-```powershell
-# window stays open — this is what clients log in to
-.\Start Soft Server.bat
-```
-
-Or:
-
-```powershell
-$env:LANEORA_SOFT_HOST = "0.0.0.0"
-$env:LANEORA_SOFT_PORT = "8787"
-python server\soft_shim.py
-```
-
-Point the client at that server:
+Point a client at the server:
 
 ```powershell
 $env:LANEORA_SERVER_URL = "http://127.0.0.1:8787"
+$env:LANEORA_SKIP_UPDATE = "1"
 python -m app
 ```
 
-Closing the Laneora window does not stop other clients. Stopping the Soft server, or letting this PC sleep, stops new logins.
-
-Multi-account Soft health + DAT URL decrypt check:
-
-```powershell
-python scripts\test_soft_and_accounts.py
-```
-
-Skip remote update download:
-
-```powershell
-$env:LANEORA_SKIP_UPDATE = "1"
-```
-
----
-
-## Test checklist
-
-1. Start the Soft server and open http://127.0.0.1:8787/admin  
-2. Sign in. The login card goes away and the user list is the page  
-3. Create a user with a plan, or use an existing Soft user that has no plan yet  
-4. Run `python -m app`, sign in, and choose **Load DAT Stream**  
-5. Confirm Search Loads opens and an expired plan is refused on the next login  
-
----
-
-## Optional EXE build
+Build the program you send to a dispatcher:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\build.ps1
 ```
 
-Output: `dist\Laneora.exe`
+Output: `dist\Laneora.exe`, started by `dist\Laneora Soft.bat`.
 
 ---
 
-## Architecture (short)
+## Check that it works
 
-```text
-Admin dashboard  →  Soft server (users, plans, DAT cookies)
-Client login     →  Soft /authenticate + /logger
-Load DAT Stream  →  Qt WebEngine opens DAT One Search Loads
-```
+1. Start the Soft server and open http://127.0.0.1:8787/admin
+2. Sign in. The login card is gone and the user list is the page
+3. Create a user with a plan, or use an account that has no plan yet
+4. Run the client, sign in, and open the load search
+5. Put an end time in the past and confirm the next login is refused
 
 ---
 
-## SEO / keywords
+## Keywords
 
-**Primary:** Laneora, DAT board client, DAT One desktop app, DAT Power browser, truck dispatch software, load board stream client, Soft awwthat client, freight dispatch Windows app  
-
-**Secondary:** PyQt5 WebEngine DAT, HTTP proxy load board, multi-account Soft roster, dispatch session restore, usurpModal cleaner, ipinfo timezone dispatch, Soft authenticate logger  
-
-**Related:** trucking TMS companion, carrier dispatch tooling, load board automation desktop, Qt Chromium DAT login  
+Laneora, freight dispatch desktop software, shared load-board session, dispatcher subscription plans, Windows load search client, PyQt5 Qt WebEngine browser, cookie session restore, AES encrypted stream payload, single-screen login heartbeat, multi-user dispatch access, static egress IP for one board session, PyInstaller Windows desktop build.
 
 ---
 
 ## Release
 
-Current product version: **v3.0.0** (see [Releases](https://github.com/mafzalkalwardev/laneora/releases)).
+Current version: **v3.0.0** ([releases](https://github.com/mafzalkalwardev/laneora/releases)).
 
----
-
-## Notes
-
-- The Soft server in this repo is the login service clients use. `soft.awwthat.com` is not required.  
-- Account passwords and captured DAT cookies stay in `data/` on the machine running the server. Do not commit those files.  
-- Large binaries are gitignored (`dist/`, `*.exe`).  
-- More operator steps are in `ADMIN_OPS.md` and `CLIENT_INSTALL.md`.  
+Account passwords and captured board cookies stay in `data/` on the server PC. Do not commit those files. Program builds are gitignored (`dist/`, `*.exe`).
 
 ---
 
 <div align="center">
 
-**Laneora** — DAT board streams for dispatch teams
+**Laneora** — one board session, many dispatchers, plans you control
 
 </div>
