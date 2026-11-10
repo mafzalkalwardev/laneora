@@ -14,7 +14,11 @@ Multi-PC + same IP:
 """
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
+import re
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -78,14 +82,65 @@ def _all_accounts() -> list[dict]:
     return list(by_name.values())
 
 
+_WS_RE = re.compile(r"^[\s\u200B\u00A0]+|[\s\u200B\u00A0]+$")
+
+
+def _client_secret(value: str) -> str:
+    """Same fold the v3.0.0 desktop client applies before GET /authenticate."""
+    return _WS_RE.sub("", str(value or "").strip().lower())
+
+
+def _b64d(text: str) -> bytes:
+    pad = "=" * (-len(text) % 4)
+    return base64.urlsafe_b64decode(text + pad)
+
+
+def _is_pbkdf2_hash(value: str) -> bool:
+    parts = str(value or "").split("$")
+    if len(parts) != 4 or parts[0] != "pbkdf2_sha256" or not parts[1].isdigit():
+        return False
+    rounds = int(parts[1])
+    return 1 <= rounds <= 5_000_000
+
+
+def _verify_pbkdf2(password: str, encoded: str) -> bool:
+    """Check a pbkdf2_sha256$rounds$salt$hash string. Invalid strings do not match."""
+    try:
+        if not _is_pbkdf2_hash(encoded):
+            return False
+        _algo, rounds_text, salt_text, digest_text = encoded.split("$")
+        digest = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            _b64d(salt_text),
+            int(rounds_text),
+        )
+        return hmac.compare_digest(digest, _b64d(digest_text))
+    except (ValueError, TypeError):
+        return False
+
+
 def _find_user(username: str, password: str) -> dict | None:
-    username = username.strip().lower()
-    password = password.strip().lower()
+    username = _client_secret(username)
+    password = _client_secret(password)
+    if not username or not password:
+        return None
     for user in _all_accounts():
-        if str(user.get("username", "")).lower() != username:
+        if _client_secret(str(user.get("username", ""))) != username:
             continue
-        if str(user.get("password", "")).lower() != password:
-            continue
+        plain = user.get("password")
+        plain_text = "" if plain is None else str(plain)
+        # Restored accounts still have a plaintext password. Keep that compare.
+        if plain_text and not _is_pbkdf2_hash(plain_text):
+            if plain_text.lower() != password:
+                return None
+            return user
+        # Hash-only account (pbkdf2_sha256$600000$...). No plaintext fallback.
+        encoded = str(user.get("password_hash") or "")
+        if not encoded and _is_pbkdf2_hash(plain_text):
+            encoded = plain_text
+        if not encoded or not _verify_pbkdf2(password, encoded):
+            return None
         return user
     return None
 
@@ -269,7 +324,8 @@ def main() -> None:
     print(f"multi_screen={cfg.get('allow_multi_screen', True)}  shared_proxy={proxy.get('px')}:{proxy.get('p')}")
     print(f"Accounts ({len(users)}):")
     for user in users:
-        print(f"  - {user.get('username')} / {user.get('password')}  px={user.get('px')}")
+        # Do not log Soft passwords (data secrets).
+        print(f"  - {user.get('username')}  px={user.get('px')}")
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
     try:
         httpd.serve_forever()
