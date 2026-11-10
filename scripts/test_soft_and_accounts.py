@@ -49,7 +49,10 @@ def sync_roster_from_local() -> None:
     local = json.loads((ROOT / "data" / "local_users.json").read_text(encoding="utf-8"))
     save_roster([])
     for user in local.get("users") or []:
-        upsert_user(str(user["username"]), str(user["password"]), str(user["username"]))
+        password = str(user.get("password") or "")
+        if not password or password.startswith("pbkdf2_sha256$"):
+            continue
+        upsert_user(str(user["username"]), password, str(user["username"]))
 
 
 def wait_local(timeout: float = 15.0) -> None:

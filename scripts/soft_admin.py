@@ -12,7 +12,9 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -21,18 +23,45 @@ sys.path.insert(0, str(ROOT))
 
 from server.soft_admin_lib import (  # noqa: E402
     check_egress_ip,
+    dashboard_public_state,
+    disable_totp,
     import_dat_store,
+    import_roster,
     load_config,
     load_local_users,
+    migrate_secrets,
+    replace_dashboard_credentials,
+    revoke_all_sessions,
+    roster_only_usernames,
     set_multi_screen,
     set_shared_proxy,
+    strip_roster_passwords,
     upsert_account,
+    begin_totp,
+    confirm_totp,
 )
+
+
+def _secret_from_env_or_prompt(env_name: str, prompt: str) -> str:
+    value = os.environ.get(env_name, "")
+    if value:
+        return value
+    if not sys.stdin.isatty():
+        raise SystemExit(f"Set {env_name}. Passwords are not accepted as arguments.")
+    return getpass.getpass(prompt)
 
 
 def cmd_status(_: argparse.Namespace) -> int:
     cfg = load_config()
     users = load_local_users()
+    state = dashboard_public_state(cfg)
+    plain_clients = sum(1 for user in users if isinstance(user.get("password"), str) and user.get("password"))
+    plain_dashboard = bool((cfg.get("dashboard") or {}).get("password"))
+    print("dashboard_configured:", state["configured"] or plain_dashboard)
+    print("dashboard_totp:", state["totp_enabled"])
+    if plain_clients or plain_dashboard:
+        print("plaintext passwords are still stored.")
+        print("Snapshot data/soft_config.json and data/local_users.json, then run: python scripts/soft_admin.py migrate")
     proxy = cfg.get("shared_proxy") or {}
     print("allow_multi_screen:", cfg.get("allow_multi_screen", True))
     print(
@@ -146,6 +175,88 @@ def cmd_import_store(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_migrate(_: argparse.Namespace) -> int:
+    stats = migrate_secrets()
+    print("migration complete")
+    print("dashboard_configured:", stats["dashboard_configured"])
+    print("dashboard_password_hashed:", stats["dashboard_password_hashed"])
+    print("dashboard_default_removed:", stats["dashboard_default_removed"])
+    print("client_passwords_hashed:", stats["client_passwords_hashed"])
+    print("session_key:", "present" if stats["session_key"] else "missing")
+    pending = roster_only_usernames()
+    if pending:
+        print("roster usernames not on the server:", ", ".join(pending))
+        print("Review them, then: python scripts/soft_admin.py import-roster --yes")
+    return 0
+
+
+def cmd_import_roster(args: argparse.Namespace) -> int:
+    result = import_roster(apply=bool(args.yes))
+    if not args.yes:
+        print("not imported (pass --yes to hash these into the server store):")
+        for name in result["pending"]:
+            print(" -", name)
+        if not result["pending"]:
+            print("(none)")
+        return 0
+    print("imported:", ", ".join(result["imported"]) or "(none)")
+    return 0
+
+
+def cmd_roster_strip(_: argparse.Namespace) -> int:
+    count = strip_roster_passwords()
+    print(f"cleared passwords on {count} desktop roster row(s). Server logins were not changed.")
+    return 0
+
+
+def cmd_dashboard_set(args: argparse.Namespace) -> int:
+    password = None
+    if not args.generate_password:
+        password = _secret_from_env_or_prompt("LANEORA_DASHBOARD_PASSWORD", "New dashboard password: ")
+    generated = replace_dashboard_credentials(
+        args.username or None,
+        password,
+        generate_username=bool(args.generate_username),
+        generate_password=bool(args.generate_password),
+    )
+    print("dashboard sign-in replaced; existing admin sessions revoked")
+    print("username:", generated.get("username") or generated.get("username_set"))
+    if generated.get("password"):
+        print("password:", generated["password"])
+        print("Store this password now. It is not saved in plaintext and will not be shown again.")
+    return 0
+
+
+def cmd_sessions_revoke(_: argparse.Namespace) -> int:
+    generation = revoke_all_sessions()
+    print("admin sessions revoked")
+    print("session_generation:", generation)
+    return 0
+
+
+def cmd_totp_enroll(args: argparse.Namespace) -> int:
+    started = begin_totp()
+    print("secret:", started["secret"])
+    print("otpauth:", started["otpauth"])
+    code = args.code or _secret_from_env_or_prompt("LANEORA_TOTP_CODE", "Current authenticator code: ")
+    codes, _token = confirm_totp(code)
+    print("two-factor authentication enabled; other admin sessions revoked")
+    print("recovery codes (shown once):")
+    for item in codes:
+        print(item)
+    return 0
+
+
+def cmd_totp_disable(args: argparse.Namespace) -> int:
+    password = _secret_from_env_or_prompt("LANEORA_DASHBOARD_PASSWORD", "Dashboard password: ")
+    code = "" if args.lost_device else (
+        args.code or _secret_from_env_or_prompt("LANEORA_TOTP_CODE", "Authenticator or recovery code: ")
+    )
+    disable_totp(password, code, lost_device=bool(args.lost_device))
+    print("two-factor authentication disabled; admin sessions revoked")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Laneora Soft admin (shared IP + multi-PC)")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -187,6 +298,34 @@ def main() -> int:
     p.add_argument("--file", default="", help="Cookie JSON path (default data/dat_cookies_captured.json)")
     p.add_argument("--username", default="", help="Only this Soft user (default: all)")
     p.set_defaults(func=cmd_push_capture)
+
+    p = sub.add_parser("migrate", help="Hash plaintext dashboard and client passwords")
+    p.set_defaults(func=cmd_migrate)
+
+    p = sub.add_parser("import-roster", help="List or import desktop roster accounts missing on the server")
+    p.add_argument("--yes", action="store_true", help="Hash the listed accounts into the server store")
+    p.set_defaults(func=cmd_import_roster)
+
+    p = sub.add_parser("roster-strip", help="Remove passwords from the desktop roster file")
+    p.set_defaults(func=cmd_roster_strip)
+
+    p = sub.add_parser("dashboard-set", help="Set the dashboard username and password")
+    p.add_argument("--username", default="", help="Dashboard username. Omit to keep the current one.")
+    p.add_argument("--generate-username", action="store_true", help="Generate a 32-character username and print it once")
+    p.add_argument("--generate-password", action="store_true", help="Generate a 40-character password and print it once")
+    p.set_defaults(func=cmd_dashboard_set)
+
+    p = sub.add_parser("sessions-revoke", help="Sign out every dashboard browser")
+    p.set_defaults(func=cmd_sessions_revoke)
+
+    p = sub.add_parser("totp-enroll", help="Enroll an optional authenticator and print recovery codes once")
+    p.add_argument("--code", default="", help="Prefer LANEORA_TOTP_CODE. A code confirms enrollment.")
+    p.set_defaults(func=cmd_totp_enroll)
+
+    p = sub.add_parser("totp-disable", help="Turn off dashboard two-factor authentication")
+    p.add_argument("--code", default="")
+    p.add_argument("--lost-device", action="store_true", help="Clear the factor with the dashboard password only")
+    p.set_defaults(func=cmd_totp_disable)
 
     args = parser.parse_args()
     return int(args.func(args))

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Laneora Admin</title>
-  <style>
+  <style nonce="{{CSP_NONCE}}">
     :root {
       --bg: #0B1220;
       --card: #121A2A;
@@ -119,6 +119,8 @@
       <input id="dashUser" autocomplete="username" required />
       <label for="dashPass">Password</label>
       <input id="dashPass" type="password" autocomplete="current-password" required />
+      <label id="totpLabel" for="dashTotp" hidden>Verification code</label>
+      <input id="dashTotp" autocomplete="one-time-code" hidden />
       <p class="error" id="loginError"></p>
       <button class="btn block" type="submit">Sign in</button>
     </form>
@@ -143,18 +145,37 @@
         <label for="newUser">Username</label>
         <input id="newUser" required />
         <label for="newPass">Password</label>
-        <input id="newPass" required />
+        <input id="newPass" type="password" autocomplete="new-password" required />
         <label for="newPlan">Plan</label>
         <select id="newPlan"></select>
         <p class="error" id="createError"></p>
         <button class="btn block" type="submit">Create user</button>
-        <h2 style="margin-top:28px">Dashboard password</h2>
-        <p class="hint">This is only for this admin page. It does not change a Soft user named admin.</p>
+        <h2 style="margin-top:28px">Dashboard sign-in</h2>
+        <p class="hint">This is only for this admin page. It does not change a Soft user, even one named the same.</p>
         <label for="curDash">Current password</label>
-        <input id="curDash" type="password" />
-        <label for="newDash">New password</label>
-        <input id="newDash" type="password" />
-        <button class="btn ghost block" id="dashPassBtn" type="button">Change password</button>
+        <input id="curDash" type="password" autocomplete="current-password" />
+        <label for="newDashUser">New username (optional)</label>
+        <input id="newDashUser" autocomplete="off" />
+        <label for="newDash">New password (optional)</label>
+        <input id="newDash" type="password" autocomplete="new-password" />
+        <button class="btn ghost block" id="dashPassBtn" type="button">Update dashboard sign-in</button>
+        <h2 style="margin-top:28px">Two-factor authentication</h2>
+        <p class="hint" id="totpState">Optional. Password sign-in stays on until you confirm a code from an authenticator app.</p>
+        <button class="btn ghost block" id="totpSetupBtn" type="button">Set up authenticator</button>
+        <div id="totpSetup" hidden>
+          <p class="hint">Add this secret in the app, then enter a code. Recovery codes are shown once.</p>
+          <p id="totpSecret" class="pass"></p>
+          <input id="totpConfirm" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code" />
+          <button class="btn block" id="totpConfirmBtn" type="button">Confirm and enable</button>
+        </div>
+        <div id="totpOff" hidden>
+          <label for="totpDisableCode">Code or recovery code</label>
+          <input id="totpDisableCode" autocomplete="one-time-code" />
+          <label for="totpDisablePass">Dashboard password</label>
+          <input id="totpDisablePass" type="password" autocomplete="current-password" />
+          <button class="btn ghost block" id="totpDisableBtn" type="button">Turn off two-factor</button>
+        </div>
+        <pre id="recoveryCodes" hidden></pre>
         <p id="toast"></p>
       </form>
       <section>
@@ -165,7 +186,7 @@
       </section>
     </div>
   </div>
-  <script>
+  <script nonce="{{CSP_NONCE}}">
     if ("scrollRestoration" in history) history.scrollRestoration = "manual";
     const $ = (id) => document.getElementById(id);
     let plans = [];
@@ -194,10 +215,20 @@
       return date.toLocaleString();
     }
 
+    function csrfToken() {
+      const match = document.cookie.match(/(?:^|; )laneora_csrf=([^;]*)/);
+      return match ? decodeURIComponent(match[1]) : "";
+    }
+
     async function api(path, body) {
+      const headers = {};
+      if (body) {
+        headers["Content-Type"] = "application/json";
+        headers["X-CSRF-Token"] = csrfToken();
+      }
       const res = await fetch(path, {
         method: body ? "POST" : "GET",
-        headers: body ? { "Content-Type": "application/json" } : {},
+        headers,
         body: body ? JSON.stringify(body) : undefined
       });
       const data = await res.json().catch(() => ({}));
@@ -236,7 +267,7 @@
             <span class="badge ${esc(user.status)}">${esc(user.status)}</span>
           </div>
           <div class="meta">
-            Password <span class="pass">${esc(user.password)}</span><br>
+            Password is set<br>
             ${esc(user.plan_label || "No plan")} · ${esc(remaining(user.remaining_seconds))}<br>
             Ends ${esc(when(user.subscription_end))} · ${user.cookies} session cookies
           </div>
@@ -246,7 +277,7 @@
             <button class="btn ghost small" type="button" data-act="extend">Add onto current</button>
           </div>
           <div class="row">
-            <input data-pass placeholder="New password" />
+            <input data-pass type="password" autocomplete="new-password" placeholder="New password" />
             <button class="btn ghost small" type="button" data-act="password">Save password</button>
             <button class="btn ghost small" type="button" data-act="toggle">${user.active ? "Disable" : "Enable"}</button>
             <button class="btn danger small" type="button" data-act="delete">Delete</button>
@@ -255,10 +286,19 @@
       `).join("") || `<p class="hint">No users match.</p>`;
     }
 
+    function showTotp(enabled) {
+      $("totpSetupBtn").hidden = !!enabled;
+      $("totpOff").hidden = !enabled;
+      $("totpState").textContent = enabled
+        ? "Two-factor authentication is on. A code is required after the password."
+        : "Optional. Password sign-in stays on until you confirm a code from an authenticator app.";
+    }
+
     async function load() {
       const data = await api("/admin/api/users");
       plans = data.plans;
       users = data.users;
+      showTotp(!!data.totp_enabled);
       $("newPlan").innerHTML = planOptions("month_1");
       render();
     }
@@ -267,7 +307,17 @@
       event.preventDefault();
       $("loginError").textContent = "";
       try {
-        await api("/admin/api/login", { username: $("dashUser").value, password: $("dashPass").value });
+        const body = { username: $("dashUser").value, password: $("dashPass").value };
+        if (!$("dashTotp").hidden) body.code = $("dashTotp").value;
+        const data = await api("/admin/api/login", body);
+        if (data.totp_required) {
+          $("totpLabel").hidden = false;
+          $("dashTotp").hidden = false;
+          $("dashTotp").required = true;
+          $("loginError").textContent = "Enter the code from your authenticator app, or a recovery code.";
+          $("dashTotp").focus();
+          return;
+        }
         showAdmin();
         await load();
       } catch (err) {
@@ -304,10 +354,14 @@
       $("toast").textContent = "";
       $("createError").textContent = "";
       try {
-        await api("/admin/api/password", { current: $("curDash").value, password: $("newDash").value });
+        const body = { current: $("curDash").value };
+        if ($("newDash").value) body.password = $("newDash").value;
+        if ($("newDashUser").value.trim()) body.username = $("newDashUser").value.trim();
+        await api("/admin/api/password", body);
         $("curDash").value = "";
         $("newDash").value = "";
-        $("toast").textContent = "Dashboard password changed.";
+        $("newDashUser").value = "";
+        $("toast").textContent = "Dashboard sign-in updated. Other browsers were signed out.";
       } catch (err) {
         $("createError").textContent = err.message;
       }
@@ -326,9 +380,52 @@
       plans = data.plans;
       users = data.users;
       showAdmin();
+      showTotp(!!data.totp_enabled);
       $("newPlan").innerHTML = planOptions("month_1");
       render();
     }).catch(() => {});
+
+    $("totpSetupBtn").addEventListener("click", async () => {
+      $("toast").textContent = "";
+      try {
+        const data = await api("/admin/api/totp/setup", {});
+        $("totpSecret").textContent = data.secret;
+        $("totpSetup").hidden = false;
+        $("recoveryCodes").hidden = true;
+      } catch (err) {
+        $("toast").textContent = "";
+        alert(err.message);
+      }
+    });
+
+    $("totpConfirmBtn").addEventListener("click", async () => {
+      try {
+        const data = await api("/admin/api/totp/confirm", { code: $("totpConfirm").value });
+        $("recoveryCodes").hidden = false;
+        $("recoveryCodes").textContent = "Recovery codes (save these now):\n" + (data.recovery_codes || []).join("\n");
+        $("totpSetup").hidden = true;
+        $("totpConfirm").value = "";
+        showTotp(true);
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+
+    $("totpDisableBtn").addEventListener("click", async () => {
+      try {
+        await api("/admin/api/totp/disable", {
+          password: $("totpDisablePass").value,
+          code: $("totpDisableCode").value
+        });
+        $("totpDisablePass").value = "";
+        $("totpDisableCode").value = "";
+        $("recoveryCodes").hidden = true;
+        showTotp(false);
+        $("toast").textContent = "Two-factor authentication is off.";
+      } catch (err) {
+        alert(err.message);
+      }
+    });
 
     $("users").addEventListener("click", async (event) => {
       const button = event.target.closest("button");
