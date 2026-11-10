@@ -43,6 +43,22 @@ python scripts\soft_admin.py add-user theirUser theirPass
 
 Tell them: Soft username + password + Soft server URL (in the bat file).
 
+## If the window is white
+
+The board page should not sit on a blank screen. Laneora shows what failed, a **Retry** button, and **Connection test**.
+
+Connection test is on the sign-in screen and on the module list. It checks DAT, the proxy when one is set, and a short download sample. It does not show passwords.
+
+The log file has no passwords or cookies. On Windows it is `%LOCALAPPDATA%\Laneora\laneora.log`. On a machine running from source it is `~/.laneora/laneora.log`. Send that file.
+
+If the graphics driver is the problem, close the app and start it again with lightweight mode:
+
+```bat
+Laneora.exe --lightweight
+```
+
+`--software-rendering` only turns off GPU compositing. `--lightweight` also loads the extra search tabs when they are opened, not all at once. A renderer crash turns on software rendering for the next start by itself.
+
 ## Notes
 
 - Soft **single-screen** is on: same Soft user on a second PC kicks the first.  

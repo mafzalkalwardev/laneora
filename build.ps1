@@ -20,6 +20,8 @@ if (-not (Test-Path .\.venv\Scripts\python.exe)) {
   --add-data "app\resources\app.ico;app\resources" `
   --hidden-import PyQt5.QtWebEngineWidgets `
   --hidden-import PyQt5.QtWebEngineCore `
+  --collect-all PyQt5.QtWebEngineWidgets `
+  --collect-all PyQt5.QtWebEngineCore `
   "app\main.py"
 
 Write-Host "Built dist\Laneora.exe"

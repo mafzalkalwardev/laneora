@@ -108,6 +108,7 @@ class ProfileSessionSync:
         self._recent: set[tuple] = set()
         self._known: dict[int, dict[str, str]] = {}
         self._pushed: dict[int, dict[str, str]] = {}
+        self._jar: dict[tuple[str, str, str], QNetworkCookie] = {}
         self._closed = False
         self._ignore_removals_until = time.monotonic() + _REMOVAL_GRACE_SECONDS
         self._poll = QTimer()
@@ -167,14 +168,45 @@ class ProfileSessionSync:
                 lambda result, source=view: self._on_token_snapshot(source, result),
             )
 
+    def overlay_cookies(self, initial: list[dict]) -> list[dict]:
+        """Start from the captured session, then let a later refresh win."""
+        merged: dict[tuple[str, str, str], dict] = {}
+        for cookie in initial or []:
+            key = (
+                str(cookie.get("name", "")),
+                str(cookie.get("domain", "")).lstrip(".").lower(),
+                str(cookie.get("path", "/") or "/"),
+            )
+            merged[key] = dict(cookie)
+        for key, cookie in self._jar.items():
+            expires = cookie.expirationDate()
+            merged[key] = {
+                "name": bytes(cookie.name()).decode("latin1"),
+                "value": bytes(cookie.value()).decode("latin1"),
+                "domain": str(cookie.domain() or ""),
+                "path": str(cookie.path() or "/"),
+                "expirationDate": expires.toSecsSinceEpoch() if expires.isValid() else "",
+                "httpOnly": bool(cookie.isHttpOnly()),
+                "secure": bool(cookie.isSecure()),
+            }
+        return list(merged.values())
+
     def _remember(self, key: tuple) -> None:
         self._recent.add(key)
         QTimer.singleShot(int(_ECHO_SECONDS * 1000), lambda key=key: self._recent.discard(key))
 
     def _on_cookie_added(self, source_id: int, cookie: QNetworkCookie) -> None:
-        if self._closed or source_id not in self._opened:
+        if self._closed:
             return
         copy = _clone_cookie(cookie)
+        identity = (
+            bytes(copy.name()).decode("latin1"),
+            str(copy.domain() or "").lstrip(".").lower(),
+            str(copy.path() or "/"),
+        )
+        self._jar[identity] = copy
+        if source_id not in self._opened:
+            return
         key = _cookie_key(copy, removed=False)
         if key in self._recent:
             return

@@ -84,24 +84,25 @@ class WindowModuleTest(unittest.TestCase):
         session = AuthSession("ada", "secret", 1, 1, dict(self.base))
         self.window.session = session
         self.window.show_select_screen(session)
-        self.assertEqual(_layout_buttons(self.window), ["Load DAT Stream"])
+        self.assertEqual(_layout_buttons(self.window), ["Load DAT Stream", "Connection test"])
 
     def test_assigned_services_show_both_modules(self) -> None:
         session = AuthSession("ada", "secret", 1, 1, {**self.base, "services": "dat_dual,dat"})
         self.window.session = session
         self.window.show_select_screen(session)
-        self.assertEqual(_layout_buttons(self.window), ["Load DAT Stream", "Dual DAT Search"])
+        self.assertEqual(_layout_buttons(self.window), ["Load DAT Stream", "Dual DAT Search", "Connection test"])
 
     def test_picker_shows_only_the_modules_assigned_to_this_login(self) -> None:
         cases = {
-            DAT_3: ["3 DAT Search"],
-            DAT_4: ["4 DAT Search"],
-            f"{DAT_4},{DAT_3}": ["3 DAT Search", "4 DAT Search"],
+            DAT_3: ["3 DAT Search", "Connection test"],
+            DAT_4: ["4 DAT Search", "Connection test"],
+            f"{DAT_4},{DAT_3}": ["3 DAT Search", "4 DAT Search", "Connection test"],
             f"{DAT},{DAT_DUAL},{DAT_3},{DAT_4}": [
                 "Load DAT Stream",
                 "Dual DAT Search",
                 "3 DAT Search",
                 "4 DAT Search",
+                "Connection test",
             ],
         }
         for raw, expected in cases.items():
@@ -231,6 +232,81 @@ class WindowModuleTest(unittest.TestCase):
         )
         self.assertEqual(self.window._session_sync.store_count, 4)
         self.assertFalse(self.window._session_sync.closed)
+
+    def test_blank_page_shows_the_reason_retry_and_log(self) -> None:
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        session = AuthSession("ada", "secret", 1, 1, dict(self.base))
+        self.window.session = session
+        self.window._services = [DAT]
+        self.window.browse(self.blob, "none", 0, "", "", "one", 0)
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            with patch("app.client_log.log_dir", return_value=folder), patch(
+                "app.runtime_mode.log_dir", return_value=folder
+            ):
+                self.window._note_load_result(self.window.browser, False, "Screen")
+                self.assertIsNotNone(self.window._banner)
+                self.assertIn("blank page", self.window._banner_text.text())
+                self.assertIn(str(folder / "laneora.log"), self.window._banner_text.text())
+                labels = [button.text() for button in self.window._banner.findChildren(QPushButton)]
+                self.assertIn("Retry", labels)
+                self.assertIn("Connection test", labels)
+                self.window._on_renderer_stopped(self.window.browser, "Screen", 2, 11)
+                self.assertIn("crashed", self.window._banner_text.text())
+                self.assertIn("software_rendering", (folder / "settings.json").read_text(encoding="utf-8"))
+                self.assertIn("page-problem", (folder / "laneora.log").read_text(encoding="utf-8"))
+
+    def test_lightweight_mode_loads_a_tab_when_it_is_opened(self) -> None:
+        from unittest.mock import patch
+
+        from PyQt5.QtWidgets import QLabel
+
+        session = AuthSession("ada", "secret", 1, 1, {**self.base, "services": DAT_4})
+        self.window.session = session
+        self.window._services = [DAT_4]
+        with patch("app.window.lightweight_enabled", return_value=True):
+            self.window.open_service(DAT_4)
+            lazy = [widget for widget in self.window.findChildren(QLabel) if widget.objectName() == "lazyTab"]
+            self.assertEqual(len(lazy), 3)
+            self.assertEqual(len(self.window.findChildren(QWebEngineView)), 1)
+            self.assertEqual(
+                self.window.findChildren(QWebEngineView)[0].page().profile().httpCacheMaximumSize(),
+                8 * 1024 * 1024,
+            )
+            self.window.tabs.setCurrentIndex(2)
+            self.assertEqual(len(self.window.findChildren(QWebEngineView)), 2)
+            self.assertEqual(self.window.tabs.tabText(2), "Search 3")
+            self.assertFalse(self.window.tabs.tabBar().isHidden())
+
+    def test_connection_test_shows_a_pass_fail_summary(self) -> None:
+        from PyQt5.QtCore import QTimer
+        from PyQt5.QtWidgets import QApplication, QLabel
+
+        from app.connection_test import Check
+
+        def runner(**kwargs):
+            return [
+                Check("one.dat.com", True, "HTTP 200, first byte 5 ms, sample 2 KB at 20 KB/s", "direct"),
+                Check("proxy", True, "not configured; this PC connects directly", "info"),
+            ]
+
+        self.window._connection_runner = runner
+        seen: list[str] = []
+
+        def close_dialog() -> None:
+            dialog = QApplication.activeModalWidget()
+            if dialog is None:
+                return
+            seen.extend(label.text() for label in dialog.findChildren(QLabel))
+            dialog.accept()
+
+        QTimer.singleShot(600, close_dialog)
+        self.window.show_connection_test()
+        self.assertTrue(any("PASS" in text and "one.dat.com" in text for text in seen))
+        self.assertTrue(any("lightweight mode" in text for text in seen))
 
 
 if __name__ == "__main__":

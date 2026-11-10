@@ -135,3 +135,14 @@ QProgressBar {
 QProgressBar::chunk {
     background-color: #F5A524;
 }
+
+QFrame#errorBanner {
+    background-color: #2A1C14;
+    border: 1px solid #F5A524;
+    border-radius: 12px;
+}
+
+QLabel#errorText {
+    color: #F5C16C;
+    font-size: 14px;
+}

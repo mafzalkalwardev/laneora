@@ -10,7 +10,6 @@ from PyQt5.QtWidgets import QApplication
 
 from app import APP_NAME, __version__
 from app.updater import check_for_updates, download_update
-from app.window import MainWindow, resource_path
 
 
 def _windows_app_id() -> None:
@@ -44,6 +43,12 @@ def load_stylesheet(app: QApplication, stylesheet_path: str) -> None:
 
 
 def start() -> None:
+    # Chromium reads GPU flags at startup, before the browser module is imported.
+    from app.runtime_mode import apply_startup_flags
+
+    apply_startup_flags()
+    from app.window import MainWindow, resource_path
+
     # leftover updater cleanup: delete=<path>
     for arg in list(sys.argv):
         if "delete" in arg and "=" in arg:
