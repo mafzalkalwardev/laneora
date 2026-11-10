@@ -3,8 +3,17 @@ title Refresh DAT cookies into Soft
 cd /d "%~dp0\.."
 
 echo.
+echo Checking whether auth0 is actually expired. A valid session does not open Chrome.
+echo.
+".venv\Scripts\python.exe" scripts\soft_admin.py capture-if-expired
+if not errorlevel 2 (
+  echo auth0 still valid. Chrome was not touched.
+  exit /b 0
+)
+
+echo.
 echo 1) Surfshark static IP ON
-echo 2) Chrome Profile 410 open on Search Loads (debugging port 9334)
+echo 2) Chrome Profile 410 already signed in on Search Loads (debugging port 9334)
 echo.
 pause
 

@@ -492,6 +492,23 @@ def capture_session_summary(now: float | None = None) -> dict[str, Any]:
     return summary
 
 
+CAPTURE_CHECK_HOURS = 12
+
+
+def capture_refresh_due(now: float | None = None) -> dict[str, Any]:
+    """True only when the stored auth0 is missing or already expired.
+
+    A still-valid jar is not a reason to open Chrome. The 12 hour figure is
+    how often an operator should run this check, not a forced recapture.
+    """
+    summary = capture_session_summary(now)
+    state = str(summary.get("auth0") or "missing")
+    due = summary.get("file") != "present" or state in {"missing", "expired"}
+    summary["due"] = due
+    summary["check_hours"] = CAPTURE_CHECK_HOURS
+    return summary
+
+
 def _streams_for_new_user() -> dict[str, Any]:
     """Copy the freshest DAT jar, not whatever happens to sit in the capture file."""
     return choose_dat_streams(load_local_users(), load_captured_dat())

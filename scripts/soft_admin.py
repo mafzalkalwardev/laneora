@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from server.soft_admin_lib import (  # noqa: E402
+    capture_refresh_due,
     capture_session_summary,
     check_egress_ip,
     dashboard_public_state,
@@ -133,6 +134,18 @@ def cmd_add_user(args: argparse.Namespace) -> int:
     user = upsert_account(args.username, args.password, streams=streams)
     print("saved", user.get("username"), "subs=", user.get("active_subs"), "px=", user.get("px"))
     return 0
+
+
+def cmd_capture_if_expired(_: argparse.Namespace) -> int:
+    """Exit 2 when the signed-in Chrome capture should run. Exit 0 when it should not."""
+    info = capture_refresh_due()
+    print("check_every_hours:", info.get("check_hours"))
+    print("jar", format_dat_session(info), f"file={info.get('file')}")
+    if not info.get("due"):
+        print("auth0 still valid. Chrome was not touched.")
+        return 0
+    print("auth0 is missing or expired. Use the existing signed-in Chrome on port 9334, then push-capture.")
+    return 2
 
 
 def cmd_push_capture(args: argparse.Namespace) -> int:
@@ -304,6 +317,12 @@ def main() -> int:
     p.add_argument("cookies_json", help="Path to cookie JSON export")
     p.add_argument("--url", default=None, help="Override stream URL")
     p.set_defaults(func=cmd_import_store)
+
+    p = sub.add_parser(
+        "capture-if-expired",
+        help="Exit 2 when auth0 is missing or expired. Does not open Chrome.",
+    )
+    p.set_defaults(func=cmd_capture_if_expired)
 
     p = sub.add_parser(
         "push-capture",

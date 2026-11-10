@@ -87,7 +87,7 @@ python scripts\soft_admin.py multi-screen off
 
 | When | Why |
 |------|-----|
-| **Every 4–6 hours** while clients are working | DAT Auth0 cookies expire; safest cadence |
+| **Every 12 hours** | Run `python scripts\soft_admin.py capture-if-expired`. It prints expiry only. Exit 0 means auth0 is still valid and Chrome stays untouched. Exit 2 means it is missing or expired: then run the capture below against the Chrome that is already signed in. |
 | **Morning before shift** | Clean start for the day |
 | **Whenever a client says DAT kicked them / login page** | Immediate recapture + `push-capture` |
 

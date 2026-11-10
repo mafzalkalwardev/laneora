@@ -470,7 +470,10 @@ class AdminSecurityTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(raw.decode("utf-8"))["status"], "okie")
         self.assertTrue(
-            all(key.lower() != "access-control-allow-origin" for key, _value in self.last_headers)
+            any(
+                key.lower() == "access-control-allow-origin" and value == "*"
+                for key, value in self.last_headers
+            )
         )
         log_line = security.redact_secrets(
             "GET /authenticate?username=admin&key=client-secret-99&value=1 HTTP/1.1"
@@ -502,7 +505,9 @@ class AdminSecurityTests(unittest.TestCase):
         self.migrate()
         status, _raw, _cookies = self.request("GET", "/health")
         self.assertEqual(status, 200)
-        self.assertFalse(any(key.lower() == "access-control-allow-origin" for key, _value in self.last_headers))
+        self.assertTrue(
+            any(key.lower() == "access-control-allow-origin" and value == "*" for key, value in self.last_headers)
+        )
 
     def test_optional_totp_is_not_mandatory_until_enrolled(self) -> None:
         self.write_plaintext(

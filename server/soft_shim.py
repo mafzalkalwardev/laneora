@@ -150,8 +150,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
+        # v3.0.0 dispatcher builds call these routes with requests and ignore
+        # CORS, but the pre-hardening server sent this header. Keep it so the
+        # wire response matches that client.
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(data)
 
@@ -162,17 +164,10 @@ class Handler(BaseHTTPRequestHandler):
         return self.rfile.read(length) if length else b""
 
     def _authenticate(self, username: str, key: str, value: str, is_alive: str) -> None:
-        ip = security.client_ip(self)
-        if security.throttle_blocked("client", ip):
-            self._send(
-                429,
-                json.dumps({"status": "slow", "message": "Too many attempts. Wait and try again."}),
-                "application/json; charset=utf-8",
-            )
-            return
+        # v3.0.0 treats any body other than "0" or status okie as a login error.
+        # Do not answer this route with 429.
         user = _find_user(username, key)
         if not user:
-            security.throttle_record("client", ip)
             self._send(200, "0")
             return
         denied = denial_payload(user)

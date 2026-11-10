@@ -13,6 +13,7 @@ os.environ["LANEORA_DATA_DIR"] = _ISOLATION
 
 from server import security  # noqa: E402
 from server.soft_admin_lib import (  # noqa: E402
+    capture_refresh_due,
     choose_dat_streams,
     create_account,
     dat_session_summary,
@@ -160,6 +161,25 @@ class DatSessionSelectTests(unittest.TestCase):
         self.assertIn("live-user", values)
         self.assertNotIn("stale-capture", values)
         self.assertNotIn("shayan-pass-1", json.dumps(saved))
+
+    def test_refresh_is_due_only_when_auth0_expired(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        os.environ["LANEORA_DATA_DIR"] = temporary.name
+        root = Path(temporary.name)
+        root.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        path = root / "dat_cookies_captured.json"
+        path.write_text(json.dumps({"store": _jar("still-good", now + 3_600)}), encoding="utf-8")
+        fresh = capture_refresh_due(now)
+        self.assertFalse(fresh["due"])
+        self.assertEqual(fresh["check_hours"], 12)
+        self.assertNotIn("still-good", json.dumps(fresh))
+        path.write_text(json.dumps({"store": _jar("already-dead", now - 60)}), encoding="utf-8")
+        stale = capture_refresh_due(now)
+        self.assertTrue(stale["due"])
+        self.assertEqual(stale["auth0"], "expired")
+        self.assertNotIn("already-dead", json.dumps(stale))
 
 
 if __name__ == "__main__":
