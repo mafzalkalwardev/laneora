@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from app.config import USERS_FILE  # noqa: E402
+from app.config import users_file  # noqa: E402
 from app.roster import load_roster, upsert_user  # noqa: E402
 
 
@@ -23,7 +23,7 @@ def main() -> None:
 
     upsert_user(args.username, args.password, args.label or None)
     users = load_roster()
-    print(f"Saved '{args.username}' to {USERS_FILE}")
+    print(f"Saved '{args.username}' to {users_file()}")
     print(f"Roster now has {len(users)} user(s). Login still authenticates against soft.awwthat.com.")
 
 

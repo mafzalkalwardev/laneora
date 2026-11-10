@@ -176,7 +176,7 @@ Then start the server, then the client:
 
 **Requirements:** Windows 10/11, Python 3.12+.
 
-The first server start writes a dashboard login into `data/soft_config.json` under `dashboard`. Change that password on the admin page. It does not change a client user.
+The server does not invent a dashboard login. Set one on the server with `python scripts/soft_admin.py dashboard-set --generate-username --generate-password`, then store the line it prints. That login is separate from every client user, including a client named admin. See `ADMIN_OPS.md` for password storage, session revocation, and the one-time migration of existing logins.
 
 Point a client at the server:
 

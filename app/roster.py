@@ -4,14 +4,15 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.config import DATA_DIR, USERS_FILE
+from app.config import users_file, write_private
 
 
 def load_roster() -> list[dict[str, str]]:
-    if not USERS_FILE.exists():
+    path = users_file()
+    if not path.exists():
         return []
     try:
-        data = json.loads(USERS_FILE.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return []
     users = data.get("users") or []
@@ -32,7 +33,6 @@ def load_roster() -> list[dict[str, str]]:
 
 
 def save_roster(users: list[dict[str, Any]]) -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
     cleaned = []
     for user in users:
         username = str(user.get("username", "")).strip()
@@ -45,7 +45,7 @@ def save_roster(users: list[dict[str, Any]]) -> None:
                 "label": str(user.get("label") or username),
             }
         )
-    USERS_FILE.write_text(json.dumps({"users": cleaned}, indent=2) + "\n", encoding="utf-8")
+    write_private(users_file(), json.dumps({"users": cleaned}, indent=2) + "\n")
 
 
 def upsert_user(username: str, password: str, label: str | None = None) -> None:

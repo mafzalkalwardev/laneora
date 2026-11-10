@@ -2,7 +2,8 @@
 Soft-compatible API shim (replaces soft.awwthat.com /authenticate when Soft is down).
 
 Same contracts as Soft:
-  GET /authenticate?username=&key=&value=&is_alive=
+  POST /authenticate  JSON username, key, value, is_alive
+  GET  /authenticate  legacy clients only (LANEORA_ALLOW_GET_AUTH=0 turns it off)
   GET /logger?uva=
   GET /linetext
   GET /latest_version
@@ -24,15 +25,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from app import PASSPHRASE, __version__  # noqa: E402
-from app.config import USERS_FILE  # noqa: E402
 from app.crypto_util import encrypt  # noqa: E402
+from server import security  # noqa: E402
 from server.admin_api import dispatch as dispatch_admin  # noqa: E402
 from server.soft_admin_lib import (  # noqa: E402
     DEFAULT_STREAMS,
     apply_shared_proxy_to_user,
-    ensure_dashboard_login,
     load_config,
     load_local_users,
+    prepare_server,
 )
 from server.subscriptions import denial_payload  # noqa: E402
 
@@ -45,13 +46,6 @@ _LIVE: dict[str, str] = {}
 _PRIMARY: dict[str, str] = {}
 
 
-def _load_json_users(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return list(data.get("users") or [])
-
-
 def _all_accounts() -> list[dict]:
     cfg = load_config()
     by_name: dict[str, dict] = {}
@@ -59,34 +53,24 @@ def _all_accounts() -> list[dict]:
         name = str(user.get("username", "")).strip().lower()
         if name:
             by_name[name] = apply_shared_proxy_to_user(dict(user), cfg)
-    for user in _load_json_users(USERS_FILE):
-        name = str(user.get("username", "")).strip().lower()
-        if not name:
-            continue
-        if name in by_name:
-            # local_users.json is source of truth for Soft passwords; do not overwrite.
-            apply_shared_proxy_to_user(by_name[name], cfg)
-            continue
-        account = {
-            "username": user.get("username"),
-            "password": user.get("password"),
-            "active": True,
-            "active_subs": ["one", "power"],
-            "streams": DEFAULT_STREAMS,
-        }
-        by_name[name] = apply_shared_proxy_to_user(account, cfg)
     return list(by_name.values())
 
 
 def _find_user(username: str, password: str) -> dict | None:
-    username = username.strip().lower()
-    password = password.strip().lower()
+    """Verify the folded client secret against a stored hash. Plaintext is never accepted."""
+    wanted = security.normalize_client_secret(username)
+    if not wanted:
+        return None
+    matched = None
     for user in _all_accounts():
-        if str(user.get("username", "")).lower() != username:
-            continue
-        if str(user.get("password", "")).lower() != password:
-            continue
-        return user
+        if str(user.get("username", "")).strip().lower() == wanted:
+            matched = user
+            break
+    stored = str((matched or {}).get("password_hash") or "")
+    if matched is not None and security.verify_client_password(password, stored):
+        return matched
+    if matched is None:
+        security.verify_client_password(password, "")
     return None
 
 
@@ -155,16 +139,43 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "LaneoraSoftShim/1.0"
 
     def log_message(self, fmt: str, *args) -> None:
-        print(f"[soft-shim] {self.address_string()} {fmt % args}")
+        try:
+            text = fmt % args
+        except Exception:  # noqa: BLE001
+            text = " ".join(str(arg) for arg in args)
+        print(f"[soft-shim] {self.address_string()} {security.redact_secrets(text)}")
 
     def _send(self, code: int, body: str | bytes, content_type: str = "text/plain; charset=utf-8") -> None:
         data = body if isinstance(body, bytes) else body.encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
+        # v3.0.0 dispatcher builds call these routes with requests and ignore
+        # CORS, but the pre-hardening server sent this header. Keep it so the
+        # wire response matches that client.
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(data)
+
+    def _read_body(self, limit: int = 8192) -> bytes:
+        length = int(self.headers.get("Content-Length") or "0")
+        if length < 0 or length > limit:
+            raise ValueError("Request is too large.")
+        return self.rfile.read(length) if length else b""
+
+    def _authenticate(self, username: str, key: str, value: str, is_alive: str) -> None:
+        # v3.0.0 treats any body other than "0" or status okie as a login error.
+        # Do not answer this route with 429.
+        user = _find_user(username, key)
+        if not user:
+            self._send(200, "0")
+            return
+        denied = denial_payload(user)
+        if denied:
+            self._send(200, json.dumps(denied), "application/json; charset=utf-8")
+            return
+        _register_session(username, str(value), str(is_alive))
+        self._send(200, json.dumps(_build_auth_payload(user)), "application/json; charset=utf-8")
 
     def do_HEAD(self) -> None:  # noqa: N802
         if urlparse(self.path).path == "/update":
@@ -176,6 +187,31 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self) -> None:  # noqa: N802
+        path = urlparse(self.path).path
+        if path == "/authenticate":
+            try:
+                raw = self._read_body()
+                payload: dict = {}
+                content_type = str(self.headers.get("Content-Type") or "")
+                if raw and "application/json" in content_type:
+                    parsed = json.loads(raw.decode("utf-8"))
+                    if not isinstance(parsed, dict):
+                        raise ValueError("Send a JSON object.")
+                    payload = parsed
+                elif raw:
+                    from urllib.parse import parse_qs
+
+                    form = parse_qs(raw.decode("utf-8"), keep_blank_values=True)
+                    payload = {key: values[-1] for key, values in form.items()}
+                self._authenticate(
+                    str(payload.get("username") or ""),
+                    str(payload.get("key") or ""),
+                    str(payload.get("value") or ""),
+                    str(payload.get("is_alive") or ""),
+                )
+            except (ValueError, json.JSONDecodeError):
+                self._send(400, "0")
+            return
         if dispatch_admin(self):
             return
         self._send(404, "not found")
@@ -200,20 +236,15 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, b"")
             return
         if path == "/authenticate":
-            username = (qs.get("username") or [""])[0]
-            key = (qs.get("key") or [""])[0]
-            value = (qs.get("value") or [""])[0]
-            is_alive = (qs.get("is_alive") or [""])[0]
-            user = _find_user(username, key)
-            if not user:
-                self._send(200, "0")
+            if not security.allow_get_authenticate():
+                self._send(405, "POST /authenticate")
                 return
-            denied = denial_payload(user)
-            if denied:
-                self._send(200, json.dumps(denied), "application/json; charset=utf-8")
-                return
-            _register_session(username, str(value), str(is_alive))
-            self._send(200, json.dumps(_build_auth_payload(user)), "application/json; charset=utf-8")
+            self._authenticate(
+                (qs.get("username") or [""])[0],
+                (qs.get("key") or [""])[0],
+                (qs.get("value") or [""])[0],
+                (qs.get("is_alive") or [""])[0],
+            )
             return
         if path == "/logger":
             uva = (qs.get("uva") or [""])[0]
@@ -250,6 +281,7 @@ def ensure_running(host: str = HOST, port: int = PORT) -> str:
         if sock.connect_ex((connect_host, port)) == 0:
             return base
 
+    prepare_server()
     httpd = ThreadingHTTPServer((bind_host, port), Handler)
 
     def _serve() -> None:
@@ -260,16 +292,17 @@ def ensure_running(host: str = HOST, port: int = PORT) -> str:
 
 
 def main() -> None:
+    stats = prepare_server()
     cfg = load_config()
     users = _all_accounts()
     proxy = cfg.get("shared_proxy") or {}
-    ensure_dashboard_login()
     print(f"Laneora Soft shim on http://{HOST}:{PORT}")
     print(f"Admin dashboard: http://127.0.0.1:{PORT}/admin")
+    print(f"dashboard_configured={stats['dashboard_configured']} totp={bool((cfg.get('dashboard') or {}).get('totp', {}).get('enabled'))}")
     print(f"multi_screen={cfg.get('allow_multi_screen', True)}  shared_proxy={proxy.get('px')}:{proxy.get('p')}")
     print(f"Accounts ({len(users)}):")
     for user in users:
-        print(f"  - {user.get('username')} / {user.get('password')}  px={user.get('px')}")
+        print(f"  - {user.get('username')}  px={user.get('px')}")
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
     try:
         httpd.serve_forever()

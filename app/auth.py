@@ -124,17 +124,30 @@ def _ensure_shim() -> str:
 
 
 def _authenticate_against(server: str, username: str, password: str, value: int, is_alive: int) -> tuple[Any, int, str]:
-    verify = requests.get(
+    """POST credentials in the body. Older shims answer 404/405; those still get GET.
+
+    Deployed desktop binaries keep calling GET until they are replaced. New builds
+    here stop putting the password in the URL as soon as the server accepts POST.
+    """
+    body = {
+        "username": username,
+        "key": password,
+        "value": value,
+        "is_alive": is_alive,
+    }
+    verify = requests.post(
         server + "/authenticate",
-        params={
-            "username": username,
-            "key": password,
-            "value": value,
-            "is_alive": is_alive,
-        },
+        json=body,
         headers={"Accept": "application/json"},
         timeout=60,
     )
+    if verify.status_code in (404, 405):
+        verify = requests.get(
+            server + "/authenticate",
+            params=body,
+            headers={"Accept": "application/json"},
+            timeout=60,
+        )
     return _parse_authenticate_body(verify.text, verify.status_code, server), verify.status_code, verify.text
 
 
@@ -196,7 +209,7 @@ def authenticate(username: str, password: str) -> AuthSession:
 
     if isinstance(resp, dict) and resp.get("message") and resp.get("status") != "okie":
         code = str(resp.get("status") or "")
-        if code in {"expired", "disabled"}:
+        if code in {"expired", "disabled", "slow"}:
             raise AuthError(str(resp.get("message")))
         raise AuthError(
             f"Soft authenticate failed (HTTP {status}): {resp.get('message')}. "
@@ -257,21 +270,17 @@ def reauthenticate(session: AuthSession) -> AuthSession:
     """Refresh proxy/stream payloads with the same session tokens."""
     base = session.server_url or active_server_url()
     try:
-        verify = requests.get(
-            base + "/authenticate",
-            params={
-                "username": session.username,
-                "key": session.password,
-                "value": session.value,
-                "is_alive": session.is_alive,
-            },
-            headers={"Accept": "application/json"},
-            timeout=60,
+        resp, _status, _raw = _authenticate_against(
+            base,
+            session.username,
+            session.password,
+            session.value,
+            session.is_alive,
         )
     except requests.RequestException as exc:
         raise AuthError(f"Could not reach Soft ({base}): {exc}") from exc
-
-    resp = _parse_authenticate_body(verify.text, verify.status_code, base)
+    except AuthError:
+        raise
     if not isinstance(resp, dict) or resp.get("status") != "okie":
         raise AuthError("Re-authenticate failed")
     session.resp = resp
