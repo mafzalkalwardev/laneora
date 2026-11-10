@@ -246,7 +246,7 @@ class MainWindow(QMainWindow):
         else:
             self.tabs.tabBar().show()
             self._add_btn = QPushButton("+")
-            self._add_btn.setToolTip("Open a second DAT search")
+            self._add_btn.setToolTip("Open another DAT search")
             self._add_btn.setFixedWidth(36)
             self._add_btn.clicked.connect(self._open_second_search)
             self.tabs.setCornerWidget(self._add_btn, Qt.TopRightCorner)
@@ -296,9 +296,7 @@ class MainWindow(QMainWindow):
     def _open_search_tab(self, full_make: dict[str, Any]) -> None:
         """One more DAT search on its own page. Same cookie jar, separate navigation."""
         assert self.tabs is not None
-        if not can_open_another_search(self._search_count, self._search_limit) and self._search_count:
-            return
-        if self._search_count >= 2:
+        if self._search_count and not can_open_another_search(self._search_count, self._search_limit):
             return
         view = QWebEngineView()
         profile = QWebEngineProfile(view)
@@ -402,6 +400,7 @@ class MainWindow(QMainWindow):
         try:
             session = reauthenticate(self.session)
             resp = session.resp
+            self._search_limit = entitled_search_tabs(resp)
             self.browse(
                 resp[opt],
                 resp["px"],

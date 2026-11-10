@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 # Fixed lengths so the end time is predictable from the moment a plan is applied.
-# The original ids stay one DAT search. The _x2 ids are the same lengths with two searches.
+# Original ids are one DAT search. _x2, _x3, and _x6 are the same lengths with more tabs.
 _BASE_PLANS: list[dict[str, Any]] = [
     {"id": "trial_1h", "label": "Trial — 1 hour", "delta": timedelta(hours=1)},
     {"id": "day_1", "label": "1 day", "delta": timedelta(days=1)},
@@ -16,17 +16,17 @@ _BASE_PLANS: list[dict[str, Any]] = [
     {"id": "months_6", "label": "6 months", "delta": timedelta(days=180)},
     {"id": "year_1", "label": "1 year", "delta": timedelta(days=365)},
 ]
+_SEARCH_TIERS = ((1, ""), (2, "_x2"), (3, "_x3"), (6, "_x6"))
 
 PLANS: list[dict[str, Any]] = []
 for _base in _BASE_PLANS:
-    one = dict(_base)
-    one["searches"] = 1
-    PLANS.append(one)
-    two = dict(_base)
-    two["id"] = f"{_base['id']}_x2"
-    two["label"] = f"{_base['label']}, 2 searches"
-    two["searches"] = 2
-    PLANS.append(two)
+    for _count, _suffix in _SEARCH_TIERS:
+        item = dict(_base)
+        item["searches"] = _count
+        if _suffix:
+            item["id"] = f"{_base['id']}{_suffix}"
+            item["label"] = f"{_base['label']}, {_count} searches"
+        PLANS.append(item)
 
 _BY_ID = {plan["id"]: plan for plan in PLANS}
 
@@ -44,8 +44,8 @@ def account_searches(user: dict[str, Any]) -> int:
         count = int(user.get("searches", 1))
     except (TypeError, ValueError):
         return 1
-    if count >= 2:
-        return 2
+    if count in {1, 2, 3, 6}:
+        return count
     return 1
 
 
