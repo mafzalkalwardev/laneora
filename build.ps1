@@ -2,7 +2,11 @@ $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
 if (-not (Test-Path .\.venv\Scripts\python.exe)) {
-  py -3 -m venv .venv
+  if (Get-Command py -ErrorAction SilentlyContinue) {
+    py -3 -m venv .venv
+  } else {
+    python -m venv .venv
+  }
 }
 .\.venv\Scripts\python.exe -m pip install -U pip
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt pyinstaller
@@ -25,4 +29,4 @@ if (-not (Test-Path .\.venv\Scripts\python.exe)) {
   "app\main.py"
 
 Write-Host "Built dist\Laneora.exe"
-Write-Host "Give clients: dist\Laneora.exe + CLIENT_INSTALL.md shortcut bat"
+Write-Host "Clients run Laneora Soft.bat next to the exe. It sets the Soft server URL."

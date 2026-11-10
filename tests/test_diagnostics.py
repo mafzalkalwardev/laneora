@@ -128,5 +128,21 @@ class RuntimeModeTest(unittest.TestCase):
         self.assertTrue(lightweight_enabled(["--lightweight"]))
 
 
+class SelfCheckTest(unittest.TestCase):
+    def test_self_check_exits_before_the_window(self) -> None:
+        import sys
+
+        from app.main import start
+
+        old = sys.argv
+        sys.argv = ["Laneora", "--self-check"]
+        try:
+            with self.assertRaises(SystemExit) as raised:
+                start()
+            self.assertEqual(raised.exception.code, 0)
+        finally:
+            sys.argv = old
+
+
 if __name__ == "__main__":
     unittest.main()
