@@ -64,17 +64,23 @@ The desktop app can hold more than one module. The admin decides which ones each
 | --- | --- |
 | `dat` | Original module: one DAT search screen |
 | `dat_dual` | Dual DAT Search: two search tabs, each with its own session |
+| `dat_3` | 3 DAT Search: three search tabs, each with its own session |
+| `dat_6` | 6 DAT Search: six search tabs, each with its own session |
 
-Existing accounts with no `services` field stay on `dat`. New users created on the admin page start on DAT Search unless you also check Dual DAT Search.
+Each multi-search tab keeps its own browser profile. The tabs share the DAT session and the proxy. Existing accounts with no `services` field stay on `dat`. New users created on the admin page start on DAT Search unless you also check another module. Checking one module does not turn the others on.
 
 On `http://127.0.0.1:8787/admin`, each user card has service checkboxes. Check the modules that login should see, then **Save services**. The dispatcher picks them up on the next Laneora login.
 
 ```powershell
 python scripts\soft_admin.py set-services CLIENTUSER dat,dat_dual
+python scripts\soft_admin.py set-services CLIENTUSER dat_3
+python scripts\soft_admin.py set-services CLIENTUSER dat_6
 python scripts\soft_admin.py status
 ```
 
 `set-services CLIENTUSER dat` puts that login back on the original module only.
+
+Six search tabs is the heavy one. Each tab is a separate in-memory browser profile, and nothing is written to a Chrome profile folder. In a local check, six tabs that reached the DAT login page used about 1.1 GB for the whole client and peaked near 1.25 GB. A signed-in search page, with the map and the load table, will use more. Assign `dat_6` on a PC that has that memory free. The tabs do not share cookies with each other, so if DAT rotates a refresh token, later tabs can be left with the copy they opened on.
 
 ## Soft server URL for clients
 

@@ -29,7 +29,15 @@ from app.auth import AuthError, AuthSession, authenticate, reauthenticate, start
 from app.browser import apply_cookies, attach_checker_script, clear_profile, inject_local_storage
 from app.crypto_util import decrypt
 from app.roster import upsert_user
-from app.services import DAT, DAT_DUAL, DUAL_SEARCH_TABS, search_url, service_by_id
+from app.services import (
+    DAT,
+    DAT_DUAL,
+    MULTI_SEARCH_TABS,
+    search_open_delay_ms,
+    search_tab_titles,
+    search_url,
+    service_by_id,
+)
 from app.streams import apply_http_proxy
 from app.timezone_util import sync_timezone_from_ip
 
@@ -288,8 +296,8 @@ class MainWindow(QMainWindow):
             session.proxy_user,
             session.proxy_password,
         )
-        if service_id == DAT_DUAL:
-            self.browse_dual(blob, *proxy, 1)
+        if service_id in MULTI_SEARCH_TABS:
+            self.browse_multi(service_id, blob, *proxy, 1)
             return
         self.browse(blob, *proxy, "one", 1)
 
@@ -316,8 +324,14 @@ class MainWindow(QMainWindow):
 
     def browse_dual(self, br: str, px, p, pu, pd, fc: int = 0) -> None:
         """Two DAT search tabs. Each tab is a separate WebEngine profile."""
+        self.browse_multi(DAT_DUAL, br, px, p, pu, pd, fc)
+
+    def browse_multi(self, service_id: str, br: str, px, p, pu, pd, fc: int = 0) -> None:
+        """Open one multi-search module. Each tab is a separate WebEngine profile."""
+        count = MULTI_SEARCH_TABS[service_id]
+        spec = service_by_id(service_id)
         self.remove_all_widgets()
-        self._open_mode = DAT_DUAL
+        self._open_mode = service_id
         self.current_sub = "one"
         self._view_states = []
         self.tabs = QTabWidget()
@@ -333,14 +347,22 @@ class MainWindow(QMainWindow):
             threading.Thread(target=self._timezone_worker, daemon=True).start()
 
         full_make = json.loads(decrypt(PASSPHRASE, br))
-        for title in DUAL_SEARCH_TABS:
-            self._mount_independent_search(full_make, title)
+        # Dual search keeps the original uncapped cache. Larger modules cap it
+        # so six profiles cannot each grow an unbounded memory cache.
+        cap_cache = count > MULTI_SEARCH_TABS[DAT_DUAL]
+        for index, title in enumerate(search_tab_titles(count)):
+            self._mount_independent_search(
+                full_make,
+                title,
+                open_delay_ms=search_open_delay_ms(index, count),
+                cap_cache=cap_cache,
+            )
         self.tabs.setCurrentIndex(0)
         current = self.tabs.currentWidget()
         if isinstance(current, QWebEngineView):
             self.browser = current
-        self.setWindowTitle(f"{APP_NAME} v{__version__} — Dual DAT Search")
-        self._add_module_bar(DAT_DUAL)
+        self.setWindowTitle(f"{APP_NAME} v{__version__} — {spec['label']}")
+        self._add_module_bar(service_id)
         self.showMaximized()
 
     def _add_module_bar(self, current: str) -> None:
@@ -411,16 +433,26 @@ class MainWindow(QMainWindow):
         i = self.tabs.addTab(self.browser, "Screen")
         self.tabs.setCurrentIndex(i)
 
-    def _mount_independent_search(self, full_make: dict[str, Any], title: str) -> None:
+    def _mount_independent_search(
+        self,
+        full_make: dict[str, Any],
+        title: str,
+        *,
+        open_delay_ms: int = 400,
+        cap_cache: bool = False,
+    ) -> None:
         """One DAT search tab with its own cookie jar and storage.
 
         The captured session and the app proxy are the same ones the single
-        search uses. The profile is off-the-record so the two tabs do not
-        share navigation or local storage.
+        search uses. The profile is off-the-record so the tabs do not share
+        navigation or local storage.
         """
         assert self.tabs is not None
         view = QWebEngineView()
         profile = QWebEngineProfile(view)
+        if cap_cache:
+            profile.setHttpCacheType(QWebEngineProfile.MemoryHttpCache)
+            profile.setHttpCacheMaximumSize(32 * 1024 * 1024)
         page = QWebEnginePage(profile, view)
         view.setPage(page)
         attach_checker_script(view)
@@ -459,7 +491,7 @@ class MainWindow(QMainWindow):
             apply_cookies(cookie_store, store)
             view.load(QUrl(url))
 
-        QTimer.singleShot(400, _open)
+        QTimer.singleShot(open_delay_ms, _open)
         self.tabs.addTab(view, title)
 
     def speedtest(self) -> None:
@@ -492,8 +524,8 @@ class MainWindow(QMainWindow):
         try:
             session = reauthenticate(self.session)
             resp = session.resp
-            if self._open_mode == DAT_DUAL:
-                self.browse_dual(resp["one"], resp["px"], resp["p"], resp["pu"], resp["pd"], 0)
+            if self._open_mode in MULTI_SEARCH_TABS:
+                self.browse_multi(self._open_mode, resp["one"], resp["px"], resp["p"], resp["pu"], resp["pd"], 0)
                 return
             self.browse(
                 resp[opt],
