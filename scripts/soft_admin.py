@@ -22,9 +22,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from server.soft_admin_lib import (  # noqa: E402
+    capture_session_summary,
     check_egress_ip,
     dashboard_public_state,
+    dat_session_summary,
     disable_totp,
+    format_dat_session,
     import_dat_store,
     import_roster,
     load_config,
@@ -71,14 +74,21 @@ def cmd_status(_: argparse.Namespace) -> int:
     )
     print(f"accounts ({len(users)}):")
     for user in users:
-        streams = user.get("streams") or {}
-        store_counts = {k: len((v or {}).get("store") or []) for k, v in streams.items()}
+        one = ((user.get("streams") or {}).get("one") or {}).get("store") or []
         print(
             f"  - {user.get('username')}  active={user.get('active', True)}  "
             f"plan={user.get('plan_label') or 'no plan'}  "
             f"ends={user.get('subscription_end') or '—'}  "
-            f"subs={user.get('active_subs')}  px={user.get('px')}  cookies={store_counts}"
+            f"subs={user.get('active_subs')}  px={user.get('px')}  "
+            f"dat={format_dat_session(dat_session_summary(one if isinstance(one, list) else []))}"
         )
+    captured = capture_session_summary()
+    print(
+        "captured_jar:",
+        captured.get("file"),
+        format_dat_session(captured),
+        f"file_mtime={captured.get('file_mtime') or '—'}",
+    )
     print()
     print("Same IP on every PC requires a real shared HTTP proxy (not px=none).")
     print("DAT owners see that proxy egress IP, not each PC's home IP.")
@@ -138,6 +148,10 @@ def cmd_push_capture(args: argparse.Namespace) -> int:
     lst = str(data.get("lst", "{}")) if isinstance(data, dict) else "{}"
     sst = str(data.get("sst", "")) if isinstance(data, dict) else ""
     url_one = (data.get("url") if isinstance(data, dict) else None) or "https://one.dat.com"
+    summary = dat_session_summary(store if isinstance(store, list) else [])
+    print("jar", format_dat_session(summary))
+    if summary.get("auth0") == "expired":
+        print("warning: auth0 in this jar is already expired. Pushing it anyway.")
     users = load_local_users()
     targets = users
     if args.username:

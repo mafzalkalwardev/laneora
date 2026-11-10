@@ -208,6 +208,16 @@
       return Math.floor(hours / 24) + " days left";
     }
 
+    function sessionLine(user) {
+      const session = user.dat_session || {};
+      const count = session.cookies != null ? session.cookies : user.cookies;
+      const auth = session.auth0 || "missing";
+      if (auth === "valid") return count + " cookies · auth0 valid until " + when(session.auth0_expires);
+      if (auth === "expired") return count + " cookies · auth0 expired " + when(session.auth0_expires);
+      if (auth === "unknown") return count + " cookies · auth0 has no expiry";
+      return count + " cookies · no auth0";
+    }
+
     function when(iso) {
       if (!iso) return "—";
       const date = new Date(iso);
@@ -269,7 +279,7 @@
           <div class="meta">
             Password is set<br>
             ${esc(user.plan_label || "No plan")} · ${esc(remaining(user.remaining_seconds))}<br>
-            Ends ${esc(when(user.subscription_end))} · ${user.cookies} session cookies
+            Ends ${esc(when(user.subscription_end))} · ${sessionLine(user)}
           </div>
           <div class="row">
             <select data-plan>${planOptions(user.plan || "month_1")}</select>

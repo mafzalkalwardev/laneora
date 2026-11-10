@@ -5,7 +5,9 @@ import json
 import os
 import secrets
 import threading
+import time
 from copy import deepcopy
+from datetime import datetime, timezone
 from typing import Any
 
 from app.config import data_dir, local_users_file, soft_config_file, write_private
@@ -110,7 +112,7 @@ def upsert_account(
             user["active"] = active
             user["active_subs"] = streams
             if not user.get("streams"):
-                user["streams"] = {name: deepcopy(DEFAULT_STREAMS.get(name, DEFAULT_STREAMS["one"])) for name in streams}
+                user["streams"] = _streams_for_names(streams)
             apply_shared_proxy_to_user(user, cfg)
             save_local_users(users)
             return user
@@ -119,7 +121,7 @@ def upsert_account(
         "password_hash": password_hash,
         "active": active,
         "active_subs": streams,
-        "streams": {name: deepcopy(DEFAULT_STREAMS.get(name, DEFAULT_STREAMS["one"])) for name in streams},
+        "streams": _streams_for_names(streams),
     }
     apply_shared_proxy_to_user(user, cfg)
     users.append(user)
@@ -252,6 +254,7 @@ def _cookie_count(user: dict[str, Any]) -> int:
 def public_account(user: dict[str, Any]) -> dict[str, Any]:
     status = account_status(user)
     has_password = security.is_password_hash(str(user.get("password_hash") or ""))
+    one_store = ((user.get("streams") or {}).get("one") or {}).get("store") or []
     return {
         "username": user.get("username"),
         "has_password": has_password,
@@ -263,6 +266,7 @@ def public_account(user: dict[str, Any]) -> dict[str, Any]:
         "status": status,
         "remaining_seconds": remaining_seconds(user),
         "cookies": _cookie_count(user),
+        "dat_session": dat_session_summary(one_store if isinstance(one_store, list) else []),
     }
 
 
@@ -289,31 +293,219 @@ def _validate_password(password: str) -> str:
     return password
 
 
-def _streams_for_new_user() -> dict[str, Any]:
-    """Give a new Soft user the captured DAT session, or copy one that already has cookies."""
-    captured = data_dir() / "dat_cookies_captured.json"
-    if captured.exists():
-        try:
-            data = json.loads(captured.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            data = {}
+def _expiry_unix(value: Any) -> float | None:
+    """Cookie expiry as unix seconds. Session cookies and junk are unknown, not expired."""
+    if value is None or value == "":
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number <= 0:
+        return None
+    if number > 10_000_000_000:
+        number /= 1000.0
+    return number
+
+
+def _iso_utc(moment: float | None) -> str:
+    if moment is None:
+        return ""
+    return datetime.fromtimestamp(moment, timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _named_cookie_expiry(store: list[Any], name: str) -> tuple[str, float | None]:
+    """Return missing, unknown, valid, or expired for one cookie name. No cookie values."""
+    found = False
+    latest: float | None = None
+    for cookie in store:
+        if not isinstance(cookie, dict) or str(cookie.get("name") or "") != name:
+            continue
+        found = True
+        expiry = _expiry_unix(cookie.get("expirationDate"))
+        if expiry is not None and (latest is None or expiry > latest):
+            latest = expiry
+    if not found:
+        return "missing", None
+    if latest is None:
+        return "unknown", None
+    return "present", latest
+
+
+def dat_session_summary(store: list[Any] | None, now: float | None = None) -> dict[str, Any]:
+    """Counts and expiry only. Safe to print and to return from the admin API."""
+    cookies = [cookie for cookie in (store or []) if isinstance(cookie, dict)]
+    now = time.time() if now is None else float(now)
+    auth_state, auth_exp = _named_cookie_expiry(cookies, "auth0")
+    cf_state, cf_exp = _named_cookie_expiry(cookies, "__cf_bm")
+
+    def classify(state: str, expiry: float | None) -> str:
+        if state != "present":
+            return state
+        if expiry is None:
+            return "unknown"
+        return "valid" if expiry > now else "expired"
+
+    return {
+        "cookies": len(cookies),
+        "auth0": classify(auth_state, auth_exp),
+        "auth0_expires": _iso_utc(auth_exp),
+        "cf_bm": classify(cf_state, cf_exp),
+        "cf_bm_expires": _iso_utc(cf_exp),
+    }
+
+
+def format_dat_session(summary: dict[str, Any]) -> str:
+    auth = str(summary.get("auth0") or "missing")
+    when = str(summary.get("auth0_expires") or "")
+    cf = str(summary.get("cf_bm") or "missing")
+    clock = f" until {when}" if auth == "valid" and when else (f" at {when}" if auth == "expired" and when else "")
+    return f"cookies={summary.get('cookies', 0)} auth0={auth}{clock} cf_bm={cf}"
+
+
+def _stream_from_capture(data: dict[str, Any] | list[Any]) -> dict[str, Any] | None:
+    if isinstance(data, list):
+        store, lst, sst, url = data, "{}", "", "https://one.dat.com"
+    elif isinstance(data, dict):
         store = data.get("store") or data.get("cookies") or []
-        if isinstance(store, list) and store:
-            one = {
-                "url": data.get("url") or "https://one.dat.com",
-                "store": store,
-                "lst": str(data.get("lst", "{}")),
-                "sst": str(data.get("sst", "")),
-            }
-            power = deepcopy(one)
-            power["url"] = "https://power.dat.com"
-            return {"one": one, "power": power}
-    for user in load_local_users():
+        lst = data.get("lst", "{}")
+        sst = data.get("sst", "")
+        url = data.get("url") or "https://one.dat.com"
+    else:
+        return None
+    if not isinstance(store, list) or not store:
+        return None
+    return {
+        "url": str(url),
+        "store": store,
+        "lst": lst if isinstance(lst, str) else json.dumps(lst),
+        "sst": str(sst or ""),
+    }
+
+
+def _jar_rank(store: list[Any], now: float) -> tuple[int, float]:
+    """Prefer a live auth0 over a stale capture file. __cf_bm does not decide."""
+    state, expiry = _named_cookie_expiry(store, "auth0")
+    if state == "missing":
+        tier = 0
+        stamp = 0.0
+    elif state == "unknown" or expiry is None:
+        tier = 2
+        stamp = 0.0
+    elif expiry > now:
+        tier = 3
+        stamp = expiry
+    else:
+        tier = 1
+        stamp = expiry
+    if tier == 0:
+        latest = 0.0
+        for cookie in store:
+            if not isinstance(cookie, dict):
+                continue
+            moment = _expiry_unix(cookie.get("expirationDate"))
+            if moment is not None and moment > latest:
+                latest = moment
+        stamp = latest
+    return tier, stamp
+
+
+def choose_dat_streams(
+    users: list[dict[str, Any]],
+    capture: dict[str, Any] | list[Any] | None = None,
+    now: float | None = None,
+) -> dict[str, Any]:
+    """Pick the freshest DAT One jar from the capture file and existing accounts.
+
+    A nonempty capture file does not win when another account has a later auth0.
+    The returned streams are the copy a new account should store.
+    """
+    now = time.time() if now is None else float(now)
+    best_rank: tuple[int, float, int] | None = None
+    best_streams: dict[str, Any] | None = None
+
+    def consider(streams: dict[str, Any], tie: int) -> None:
+        nonlocal best_rank, best_streams
+        one = streams.get("one") or {}
+        store = one.get("store") or []
+        if not isinstance(store, list) or not store:
+            return
+        rank = (*_jar_rank(store, now), tie)
+        if best_rank is None or rank > best_rank:
+            best_rank = rank
+            best_streams = streams
+
+    captured = _stream_from_capture(capture) if capture is not None else None
+    if captured is not None:
+        power = deepcopy(captured)
+        power["url"] = "https://power.dat.com"
+        consider({"one": captured, "power": power}, 1)
+    for user in users:
         streams = user.get("streams") or {}
-        store = (streams.get("one") or {}).get("store") or []
-        if store:
-            return deepcopy(streams)
-    return {name: deepcopy(blob) for name, blob in DEFAULT_STREAMS.items()}
+        if isinstance(streams, dict):
+            consider(streams, 0)
+    if best_streams is None:
+        return {name: deepcopy(blob) for name, blob in DEFAULT_STREAMS.items()}
+    chosen = deepcopy(best_streams)
+    one = dict(chosen.get("one") or DEFAULT_STREAMS["one"])
+    if not one.get("store"):
+        return {name: deepcopy(blob) for name, blob in DEFAULT_STREAMS.items()}
+    power = dict(chosen.get("power") or {})
+    if not power.get("store"):
+        power = deepcopy(one)
+        power["url"] = "https://power.dat.com"
+    chosen["one"] = one
+    chosen["power"] = power
+    return chosen
+
+
+def load_captured_dat() -> dict[str, Any] | list[Any] | None:
+    path = data_dir() / "dat_cookies_captured.json"
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if isinstance(data, (dict, list)):
+        return data
+    return None
+
+
+def capture_session_summary(now: float | None = None) -> dict[str, Any]:
+    path = data_dir() / "dat_cookies_captured.json"
+    summary = dat_session_summary([], now)
+    summary["file"] = "missing"
+    summary["file_mtime"] = ""
+    if not path.exists():
+        return summary
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        mtime = None
+    data = load_captured_dat()
+    stream = _stream_from_capture(data) if data is not None else None
+    store = (stream or {}).get("store") or []
+    summary = dat_session_summary(store if isinstance(store, list) else [], now)
+    summary["file"] = "present"
+    summary["file_mtime"] = _iso_utc(mtime)
+    return summary
+
+
+def _streams_for_new_user() -> dict[str, Any]:
+    """Copy the freshest DAT jar, not whatever happens to sit in the capture file."""
+    return choose_dat_streams(load_local_users(), load_captured_dat())
+
+
+def _streams_for_names(names: list[str]) -> dict[str, Any]:
+    chosen = _streams_for_new_user()
+    out: dict[str, Any] = {}
+    for name in names:
+        if name in chosen:
+            out[name] = deepcopy(chosen[name])
+        else:
+            out[name] = deepcopy(DEFAULT_STREAMS.get(name, DEFAULT_STREAMS["one"]))
+    return out
 
 
 def _drop_roster(username: str) -> None:
