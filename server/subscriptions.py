@@ -5,7 +5,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 # Fixed lengths so the end time is predictable from the moment a plan is applied.
-PLANS: list[dict[str, Any]] = [
+# The original ids stay one DAT search. The _x2 ids are the same lengths with two searches.
+_BASE_PLANS: list[dict[str, Any]] = [
     {"id": "trial_1h", "label": "Trial — 1 hour", "delta": timedelta(hours=1)},
     {"id": "day_1", "label": "1 day", "delta": timedelta(days=1)},
     {"id": "week_1", "label": "1 week", "delta": timedelta(days=7)},
@@ -16,11 +17,36 @@ PLANS: list[dict[str, Any]] = [
     {"id": "year_1", "label": "1 year", "delta": timedelta(days=365)},
 ]
 
+PLANS: list[dict[str, Any]] = []
+for _base in _BASE_PLANS:
+    one = dict(_base)
+    one["searches"] = 1
+    PLANS.append(one)
+    two = dict(_base)
+    two["id"] = f"{_base['id']}_x2"
+    two["label"] = f"{_base['label']}, 2 searches"
+    two["searches"] = 2
+    PLANS.append(two)
+
 _BY_ID = {plan["id"]: plan for plan in PLANS}
 
 
 def plan_catalog() -> list[dict[str, str]]:
-    return [{"id": plan["id"], "label": plan["label"]} for plan in PLANS]
+    return [
+        {"id": plan["id"], "label": plan["label"], "searches": str(plan["searches"])}
+        for plan in PLANS
+    ]
+
+
+def account_searches(user: dict[str, Any]) -> int:
+    """Missing or unknown values stay one search. Nothing is written back."""
+    try:
+        count = int(user.get("searches", 1))
+    except (TypeError, ValueError):
+        return 1
+    if count >= 2:
+        return 2
+    return 1
 
 
 def get_plan(plan_id: str) -> dict[str, Any]:
@@ -105,6 +131,7 @@ def apply_plan(user: dict[str, Any], plan_id: str, *, extend: bool = False, now:
         end = now + plan["delta"]
     user["plan"] = plan["id"]
     user["plan_label"] = plan["label"]
+    user["searches"] = int(plan.get("searches", 1))
     user["subscription_start"] = format_utc(start)
     user["subscription_end"] = format_utc(end)
     user["active"] = True

@@ -38,7 +38,7 @@ from server.soft_admin_lib import (  # noqa: E402
     load_config,
     load_local_users,
 )
-from server.subscriptions import denial_payload  # noqa: E402
+from server.subscriptions import account_searches, denial_payload  # noqa: E402
 
 HOST = __import__("os").environ.get("LANEORA_SOFT_HOST", "0.0.0.0")
 PORT = int(__import__("os").environ.get("LANEORA_SOFT_PORT", "8787"))
@@ -161,6 +161,7 @@ def _build_auth_payload(user: dict) -> dict:
         "pu": str(user.get("pu", "")),
         "pd": str(user.get("pd", "")),
         "active_subs": ",".join(active_list),
+        "max_searches": account_searches(user),
     }
     for name in active_list:
         stream = streams.get(name) or DEFAULT_STREAMS.get(name) or {

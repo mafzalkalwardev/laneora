@@ -16,6 +16,18 @@ Or double-click `Start Soft Server.bat`.
 
 2. Keep **Surfshark static US IP ON** on this machine when you refresh DAT cookies (and on client PCs when they open DAT, unless you later set Soft `set-proxy`).
 
+## Two DAT searches
+
+The original plans stay one search. Plans whose id ends in `_x2` are the same lengths with two searches inside one Laneora window. Existing accounts do not gain a second tab until you apply an `_x2` plan. Both tabs use the one shared DAT session already on that account. They do not add a second Soft login.
+
+A build that still speaks the old authenticate response ignores `max_searches` and keeps a single search.
+
+```powershell
+python -m unittest tests/test_two_searches.py tests/test_shayan_password_hash.py -v
+```
+
+Package with `build.ps1` and entry `app\main.py`. Do not point PyInstaller at a script that imports `server`. A frozen exe that does that stops with `No module named server`. `app/search_tabs.py` does not import `server`. Dispatcher PCs should keep `LANEORA_SOFT_FALLBACK=0` so the client does not try to start a local shim.
+
 ## Create / manage Soft users (client logins)
 
 ```powershell
