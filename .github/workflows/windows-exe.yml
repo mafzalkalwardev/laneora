@@ -54,7 +54,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Laneora-windows
-          path: dist/Laneora-windows.zip
+          path: |
+            dist/Laneora.exe
+            dist/Laneora Soft.bat
           if-no-files-found: error
 
       - name: Publish GitHub release
