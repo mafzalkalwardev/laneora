@@ -24,3 +24,4 @@ if (-not (Test-Path .\.venv\Scripts\python.exe)) {
 
 Write-Host "Built dist\Laneora.exe"
 Write-Host "Give clients: dist\Laneora.exe + CLIENT_INSTALL.md shortcut bat"
+Write-Host "Entry is app\main.py. Do not add a server import; the onefile exe then fails with No module named server."

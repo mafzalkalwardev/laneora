@@ -5,7 +5,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 # Fixed lengths so the end time is predictable from the moment a plan is applied.
-PLANS: list[dict[str, Any]] = [
+# Original ids are one DAT search. _x2, _x3, and _x6 are the same lengths with more tabs.
+_BASE_PLANS: list[dict[str, Any]] = [
     {"id": "trial_1h", "label": "Trial — 1 hour", "delta": timedelta(hours=1)},
     {"id": "day_1", "label": "1 day", "delta": timedelta(days=1)},
     {"id": "week_1", "label": "1 week", "delta": timedelta(days=7)},
@@ -15,12 +16,37 @@ PLANS: list[dict[str, Any]] = [
     {"id": "months_6", "label": "6 months", "delta": timedelta(days=180)},
     {"id": "year_1", "label": "1 year", "delta": timedelta(days=365)},
 ]
+_SEARCH_TIERS = ((1, ""), (2, "_x2"), (3, "_x3"), (6, "_x6"))
+
+PLANS: list[dict[str, Any]] = []
+for _base in _BASE_PLANS:
+    for _count, _suffix in _SEARCH_TIERS:
+        item = dict(_base)
+        item["searches"] = _count
+        if _suffix:
+            item["id"] = f"{_base['id']}{_suffix}"
+            item["label"] = f"{_base['label']}, {_count} searches"
+        PLANS.append(item)
 
 _BY_ID = {plan["id"]: plan for plan in PLANS}
 
 
 def plan_catalog() -> list[dict[str, str]]:
-    return [{"id": plan["id"], "label": plan["label"]} for plan in PLANS]
+    return [
+        {"id": plan["id"], "label": plan["label"], "searches": str(plan["searches"])}
+        for plan in PLANS
+    ]
+
+
+def account_searches(user: dict[str, Any]) -> int:
+    """Missing or unknown values stay one search. Nothing is written back."""
+    try:
+        count = int(user.get("searches", 1))
+    except (TypeError, ValueError):
+        return 1
+    if count in {1, 2, 3, 6}:
+        return count
+    return 1
 
 
 def get_plan(plan_id: str) -> dict[str, Any]:
@@ -105,6 +131,7 @@ def apply_plan(user: dict[str, Any], plan_id: str, *, extend: bool = False, now:
         end = now + plan["delta"]
     user["plan"] = plan["id"]
     user["plan_label"] = plan["label"]
+    user["searches"] = int(plan.get("searches", 1))
     user["subscription_start"] = format_utc(start)
     user["subscription_end"] = format_utc(end)
     user["active"] = True

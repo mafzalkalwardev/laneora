@@ -10,6 +10,7 @@ from typing import Any
 from app.config import DATA_DIR, LOCAL_USERS_FILE, SOFT_CONFIG_FILE
 from app.roster import load_roster, save_roster, upsert_user
 from server.subscriptions import (
+    account_searches,
     account_status,
     apply_plan,
     get_plan,
@@ -278,6 +279,7 @@ def public_account(user: dict[str, Any]) -> dict[str, Any]:
         "status": status,
         "remaining_seconds": remaining_seconds(user),
         "cookies": _cookie_count(user),
+        "searches": account_searches(user),
     }
 
 

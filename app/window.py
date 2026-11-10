@@ -22,11 +22,12 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5.QtWebEngineWidgets import QWebEnginePage, QWebEngineProfile, QWebEngineView
 
 from app import APP_NAME, PASSPHRASE, POWER_DAT, SERVER_URL, SPEEDTEST_URL, __version__
 from app.auth import AuthError, AuthSession, authenticate, reauthenticate, start_logger_heartbeat
 from app.browser import apply_cookies, attach_checker_script, clear_profile, inject_local_storage
+from app.search_tabs import can_open_another_search, entitled_search_tabs
 from app.crypto_util import decrypt
 from app.roster import upsert_user
 from app.streams import apply_http_proxy
@@ -67,6 +68,10 @@ class MainWindow(QMainWindow):
         self.browser: QWebEngineView | None = None
         self.tabs: QTabWidget | None = None
         self.cookieStore = None
+        self._search_limit = 1
+        self._search_stream: dict[str, Any] | None = None
+        self._search_count = 0
+        self._add_btn: QPushButton | None = None
 
         for name in ("mark.png", "logo.png", "app.ico"):
             icon_path = resource_path(name)
@@ -206,6 +211,7 @@ class MainWindow(QMainWindow):
         self.remove_all_widgets()
         resp = session.resp
         px, p, pu, pd = session.proxy_host, session.proxy_port, session.proxy_user, session.proxy_password
+        self._search_limit = entitled_search_tabs(resp)
         blob = resp.get("one")
         if not blob:
             QMessageBox.warning(self, "Error", "DAT One stream is not on this account.")
@@ -234,7 +240,16 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.layout.addWidget(self.tabs)
         self.tabs.setDocumentMode(True)
-        self.tabs.tabBar().hide()
+        self._search_count = 0
+        if self._search_limit < 2:
+            self.tabs.tabBar().hide()
+        else:
+            self.tabs.tabBar().show()
+            self._add_btn = QPushButton("+")
+            self._add_btn.setToolTip("Open another DAT search")
+            self._add_btn.setFixedWidth(36)
+            self._add_btn.clicked.connect(self._open_second_search)
+            self.tabs.setCornerWidget(self._add_btn, Qt.TopRightCorner)
 
         px, pu, pd = str(px), str(pu), str(pd)
         p = int(p)
@@ -244,7 +259,12 @@ class MainWindow(QMainWindow):
             threading.Thread(target=self._timezone_worker, daemon=True).start()
 
         full_make = json.loads(decrypt(PASSPHRASE, br))
-        self.make_tab(full_make, opt)
+        self._search_stream = full_make
+        if self._search_limit < 2:
+            self.make_tab(full_make, opt)
+        else:
+            self._open_search_tab(full_make)
+            self._sync_add_button()
 
     def _timezone_worker(self) -> None:
         try:
@@ -260,6 +280,51 @@ class MainWindow(QMainWindow):
 
     def new_tab(self, full_make: dict[str, Any], opt: str) -> None:
         self.make_tab(full_make, opt)
+
+    def _sync_add_button(self) -> None:
+        if self._add_btn is None:
+            return
+        self._add_btn.setVisible(can_open_another_search(self._search_count, self._search_limit))
+
+    def _open_second_search(self) -> None:
+        if self._search_stream is None or not can_open_another_search(self._search_count, self._search_limit):
+            self._sync_add_button()
+            return
+        self._open_search_tab(self._search_stream)
+        self._sync_add_button()
+
+    def _open_search_tab(self, full_make: dict[str, Any]) -> None:
+        """One more DAT search on its own page. Same cookie jar, separate navigation."""
+        assert self.tabs is not None
+        if self._search_count and not can_open_another_search(self._search_count, self._search_limit):
+            return
+        view = QWebEngineView()
+        profile = QWebEngineProfile(view)
+        view.setPage(QWebEnginePage(profile, view))
+        attach_checker_script(view)
+        raw = str(full_make.get("url") or "")
+        url = "https://one.dat.com/search-loads" if "one.dat.com" in raw or not raw else raw
+        store = list(full_make.get("store") or [])
+        lst = full_make.get("lst") or "{}"
+        if not isinstance(lst, str):
+            lst = json.dumps(lst)
+        state = {"done": False}
+
+        def finished(ok: bool, v=view, st=state, loc=lst) -> None:
+            current = v.url().toString()
+            if st["done"] or not current or current.startswith("about:"):
+                return
+            if ok:
+                st["done"] = True
+                inject_local_storage(v, loc)
+
+        view.loadFinished.connect(finished)
+        apply_cookies(profile.cookieStore(), store)
+        QTimer.singleShot(400, lambda v=view, target=url: v.load(QUrl(target)) if v is not None else None)
+        self._search_count += 1
+        index = self.tabs.addTab(view, f"Search {self._search_count}")
+        self.tabs.setCurrentIndex(index)
+        self._sync_add_button()
 
     def make_tab(self, full_make: dict[str, Any], opt: str) -> None:
         assert self.tabs is not None
@@ -335,6 +400,7 @@ class MainWindow(QMainWindow):
         try:
             session = reauthenticate(self.session)
             resp = session.resp
+            self._search_limit = entitled_search_tabs(resp)
             self.browse(
                 resp[opt],
                 resp["px"],

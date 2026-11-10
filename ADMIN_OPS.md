@@ -16,6 +16,18 @@ Or double-click `Start Soft Server.bat`.
 
 2. Keep **Surfshark static US IP ON** on this machine when you refresh DAT cookies (and on client PCs when they open DAT, unless you later set Soft `set-proxy`).
 
+## DAT search tiers
+
+The original plan ids stay one DAT search. The same lengths exist again as `_x2`, `_x3`, and `_x6` for two, three, and six searches. There is no separate price. Existing accounts stay one search until you apply one of those plans. The window always opens one tab. + adds the next tab up to that account's cap, then + is hidden. Switching tabs leaves each search where it was. Every tab uses the one shared DAT session for that Soft user. It does not add another Soft login.
+
+A login that comes back with a smaller cap, or a reconnect after you apply a one-search plan, starts again at one tab. An expired plan is refused on the next login. A build that ignores `max_searches` keeps a single search.
+
+```powershell
+python -m unittest tests/test_two_searches.py tests/test_shayan_password_hash.py -v
+```
+
+Package with `build.ps1` and entry `app\main.py`. Do not point PyInstaller at a script that imports `server`. A frozen exe that does that stops with `No module named server`. `app/search_tabs.py` does not import `server`. Dispatcher PCs should keep `LANEORA_SOFT_FALLBACK=0` so the client does not try to start a local shim.
+
 ## Create / manage Soft users (client logins)
 
 ```powershell

@@ -237,7 +237,7 @@
           </div>
           <div class="meta">
             Password <span class="pass">${esc(user.password)}</span><br>
-            ${esc(user.plan_label || "No plan")} · ${esc(remaining(user.remaining_seconds))}<br>
+            ${esc(user.plan_label || "No plan")} · ${Number(user.searches) > 1 ? user.searches + " searches" : "1 search"} · ${esc(remaining(user.remaining_seconds))}<br>
             Ends ${esc(when(user.subscription_end))} · ${user.cookies} session cookies
           </div>
           <div class="row">
