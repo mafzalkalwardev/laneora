@@ -71,11 +71,9 @@ def _clone_cookie(cookie: QNetworkCookie) -> QNetworkCookie:
 
 
 def _cookie_origin(cookie: QNetworkCookie) -> QUrl:
-    host = str(cookie.domain() or "").lstrip(".")
-    if not host:
-        return QUrl()
-    scheme = "https" if cookie.isSecure() else "http"
-    return QUrl(f"{scheme}://{host}{cookie.path() or '/'}")
+    from app.webview_flow import cookie_origin
+
+    return QUrl(cookie_origin(str(cookie.domain() or "")))
 
 
 def token_write_js(items: dict[str, str]) -> str:

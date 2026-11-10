@@ -59,6 +59,8 @@ Laneora.exe --lightweight
 
 `--software-rendering` only turns off GPU compositing. `--lightweight` also loads the extra search tabs when they are opened, not all at once. A renderer crash turns on software rendering for the next start by itself.
 
+The usual silent blank page was the DAT session being wiped. The app used to delete browser cookies and then write the session back a moment later. On a slower or locked-down PC the delete finished last, so the page opened with no session and stayed white. That wipe is gone. Cookies are written onto a fresh browser profile with a real site address. `about:blank` is not treated as a loaded board page.
+
 ## Notes
 
 - Soft **single-screen** is on: same Soft user on a second PC kicks the first.  

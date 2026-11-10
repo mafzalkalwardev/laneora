@@ -242,6 +242,9 @@ class WindowModuleTest(unittest.TestCase):
         self.window.session = session
         self.window._services = [DAT]
         self.window.browse(self.blob, "none", 0, "", "", "one", 0)
+        self.assertEqual(self.window._note_load_result(self.window.browser, True, "Screen"), "ignore")
+        self.assertNotIn(id(self.window.browser), self.window._loaded_ids)
+        self.assertIsNone(self.window._banner)
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
             with patch("app.client_log.log_dir", return_value=folder), patch(

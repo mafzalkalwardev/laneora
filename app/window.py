@@ -30,7 +30,7 @@ from PyQt5.QtWebEngineWidgets import QWebEnginePage, QWebEngineProfile, QWebEngi
 
 from app import APP_NAME, PASSPHRASE, SERVER_URL, SPEEDTEST_URL, __version__
 from app.auth import AuthError, AuthSession, authenticate, reauthenticate, start_logger_heartbeat
-from app.browser import apply_cookies, attach_checker_script, clear_profile, inject_local_storage
+from app.browser import apply_cookies, attach_checker_script, inject_local_storage
 from app.client_log import client_log, log_path
 from app.connection_test import format_report, run_checks
 from app.crypto_util import decrypt
@@ -53,6 +53,7 @@ from app.services import (
 )
 from app.session_sync import ProfileSessionSync
 from app.streams import apply_http_proxy
+from app.webview_flow import is_blank_url, on_load_event
 from app.timezone_util import sync_timezone_from_ip
 
 
@@ -344,31 +345,39 @@ class MainWindow(QMainWindow):
         timer.start(self._load_timeout_ms)
         self._load_timers[id(view)] = timer
 
-    def _note_load_result(self, view: QWebEngineView | None, ok: bool, title: str) -> None:
+    def _note_load_result(self, view: QWebEngineView | None, ok: bool, title: str) -> str:
         if view is None or _qt_object_deleted(view):
-            return
-        if ok:
-            self._loaded_ids.add(id(view))
-            timer = self._load_timers.get(id(view))
-            if timer is not None:
-                timer.stop()
-            return
+            return "ignore"
         url = ""
         try:
             url = view.url().toString()
         except RuntimeError:
             url = ""
+        # The view starts on about:blank and reports that as a successful load.
+        # Counting it hides a later failure and leaves a white page.
+        if ok and is_blank_url(url):
+            return "ignore"
+        action = on_load_event(url, ok, id(view) in self._loaded_ids)
+        if action == "ignore":
+            return "ignore"
+        if action == "inject":
+            self._loaded_ids.add(id(view))
+            timer = self._load_timers.get(id(view))
+            if timer is not None:
+                timer.stop()
+            return "inject"
         count = self._load_failures.get(id(view), 0) + 1
         self._load_failures[id(view)] = count
         client_log("load-failed", tab=title, attempt=count, url=url, proxy=self._proxy_host() or "none")
-        if url and url != "about:blank" and count < 2:
+        if url and not is_blank_url(url) and count < 2:
             view.setUrl(QUrl(url))
-            return
-        if not url or url == "about:blank":
-            reason = "The browser stayed on a blank page"
+            return "fail"
+        if is_blank_url(url):
+            reason = "The browser stayed on a blank page. The DAT session was not applied."
         else:
             reason = "The page did not load"
         self._show_problem(title, reason)
+        return "fail"
 
     def _on_load_timeout(self, view: QWebEngineView, title: str) -> None:
         if _qt_object_deleted(view) or id(view) in self._loaded_ids:
@@ -611,13 +620,26 @@ class MainWindow(QMainWindow):
         self.tabs.tabBar().hide()
 
         px, pu, pd = str(px), str(pu), str(pd)
-        p = int(p)
-        apply_http_proxy(px, p, pu, pd)
+        try:
+            port = int(p)
+        except (TypeError, ValueError):
+            self._show_problem("DAT", "The proxy port from the server is not a number.")
+            return
+        apply_http_proxy(px, port, pu, pd)
 
         if fc == 1:
             threading.Thread(target=self._timezone_worker, daemon=True).start()
 
-        full_make = json.loads(decrypt(PASSPHRASE, br))
+        try:
+            full_make = json.loads(decrypt(PASSPHRASE, br))
+        except Exception as exc:  # noqa: BLE001
+            client_log("session-unreadable", error=type(exc).__name__)
+            self._show_problem(
+                "DAT",
+                "The saved DAT session could not be read. Capture it again on the admin PC, then sign in again.",
+            )
+            return
+        self._log_open(full_make)
         self.make_tab(full_make, opt)
         self._open_mode = DAT
         self.setWindowTitle(f"{APP_NAME} v{__version__} — DAT One")
@@ -642,12 +664,25 @@ class MainWindow(QMainWindow):
         self.layout.addWidget(self.tabs)
 
         px, pu, pd = str(px), str(pu), str(pd)
-        p = int(p)
-        apply_http_proxy(px, p, pu, pd)
+        try:
+            port = int(p)
+        except (TypeError, ValueError):
+            self._show_problem(spec["label"], "The proxy port from the server is not a number.")
+            return
+        apply_http_proxy(px, port, pu, pd)
         if fc == 1:
             threading.Thread(target=self._timezone_worker, daemon=True).start()
 
-        full_make = json.loads(decrypt(PASSPHRASE, br))
+        try:
+            full_make = json.loads(decrypt(PASSPHRASE, br))
+        except Exception as exc:  # noqa: BLE001
+            client_log("session-unreadable", error=type(exc).__name__)
+            self._show_problem(
+                spec["label"],
+                "The saved DAT session could not be read. Capture it again on the admin PC, then sign in again.",
+            )
+            return
+        self._log_open(full_make)
         # Dual search keeps the original uncapped cache. Larger modules cap it.
         # Lightweight mode caps every profile and creates later tabs on demand.
         light = lightweight_enabled()
@@ -717,11 +752,25 @@ class MainWindow(QMainWindow):
             bar.addWidget(button)
         self.addToolBar(bar)
 
+    def _log_open(self, full_make: dict[str, Any]) -> None:
+        store = [cookie for cookie in (full_make.get("store") or []) if isinstance(cookie, dict)]
+        names = {str(cookie.get("name") or "") for cookie in store}
+        client_log(
+            "open-dat",
+            url=search_url(full_make, "one"),
+            cookies=len(store),
+            auth0="present" if "auth0" in names else "missing",
+            proxy=self._proxy_host() or "none",
+        )
+
     def _timezone_worker(self) -> None:
         try:
             tz = sync_timezone_from_ip()
-            print("System timezone changed successfully.", tz)
+            client_log("timezone", result="ok", zone=tz)
         except Exception as exc:  # noqa: BLE001
+            # tzutil needs Windows and can be blocked by a security policy.
+            # That must not stop the board page.
+            client_log("timezone", result="failed", error=type(exc).__name__)
             print("TimeZone Error:", exc)
 
     def close_current_tab(self, i: int) -> None:
@@ -735,30 +784,27 @@ class MainWindow(QMainWindow):
     def make_tab(self, full_make: dict[str, Any], opt: str) -> None:
         assert self.tabs is not None
         self.browser = QWebEngineView()
+        # A fresh profile is empty. deleteAllCookies is async and, on a slow
+        # or locked-down PC, finishes after the session is written and erases it.
+        profile = QWebEngineProfile(self.browser)
+        if lightweight_enabled():
+            profile.setHttpCacheType(QWebEngineProfile.MemoryHttpCache)
+            profile.setHttpCacheMaximumSize(lightweight_cache_bytes())
+        self.browser.setPage(QWebEnginePage(profile, self.browser))
         attach_checker_script(self.browser)
         self._watch_view(self.browser, "Screen")
         self.browser.loadProgress.connect(self.on_load_progress)
         self.browser.loadFinished.connect(self.on_load_finished)
         self.success = 0
 
-        # DAT One opens Search Loads only. Other side tabs stay hidden via the checker.
         self.url = search_url(full_make, opt)
-
         self.store = list(full_make.get("store") or [])
         self.lst = full_make.get("lst") or "{}"
         if not isinstance(self.lst, str):
             self.lst = json.dumps(self.lst)
         self.sst = str(full_make.get("sst") or "")
 
-        profile = self.browser.page().profile()
-        if lightweight_enabled():
-            profile.setHttpCacheType(QWebEngineProfile.MemoryHttpCache)
-            profile.setHttpCacheMaximumSize(lightweight_cache_bytes())
         self.cookieStore = profile.cookieStore()
-        # deleteAllCookies is async. Setting cookies in the same turn gets wiped
-        # and DAT stays on a blank page. Apply the session after the delete runs.
-        self.cookieStore.deleteAllCookies()
-        clear_profile(profile)
         url = self.url
         store = list(self.store)
         cookie_store = self.cookieStore
@@ -811,15 +857,11 @@ class MainWindow(QMainWindow):
         cookie_store = profile.cookieStore()
         if self._session_sync is not None:
             self._session_sync.watch(profile, view)
-        # deleteAllCookies is async. Setting cookies in the same turn gets wiped.
-        cookie_store.deleteAllCookies()
-        clear_profile(profile)
         state: dict[str, Any] = {"success": 0}
         self._view_states.append(state)
 
         def on_finished(ok: bool, view: QWebEngineView = view, lst: str = lst, state: dict[str, Any] = state, title: str = title) -> None:
-            self._note_load_result(view, ok, title)
-            if not ok or state["success"]:
+            if self._note_load_result(view, ok, title) != "inject" or state["success"]:
                 return
             state["success"] = 1
             inject_local_storage(view, lst)
@@ -863,8 +905,9 @@ class MainWindow(QMainWindow):
         self.tabs.setCurrentIndex(i)
 
     def on_load_finished(self, ok: bool) -> None:
-        self._note_load_result(self.browser, ok, "Screen")
-        if not ok or self.success or self.browser is None:
+        if self._note_load_result(self.browser, ok, "Screen") != "inject":
+            return
+        if self.success or self.browser is None:
             return
         self.success = 1
         inject_local_storage(self.browser, self.lst)
