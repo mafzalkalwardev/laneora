@@ -135,7 +135,7 @@ def _find_user(username: str, password: str) -> dict | None:
             if plain_text.lower() != password:
                 return None
             return user
-        # shayan has only password_hash (pbkdf2_sha256$600000$...). No plaintext fallback.
+        # Hash-only account (pbkdf2_sha256$600000$...). No plaintext fallback.
         encoded = str(user.get("password_hash") or "")
         if not encoded and _is_pbkdf2_hash(plain_text):
             encoded = plain_text
@@ -324,7 +324,8 @@ def main() -> None:
     print(f"multi_screen={cfg.get('allow_multi_screen', True)}  shared_proxy={proxy.get('px')}:{proxy.get('p')}")
     print(f"Accounts ({len(users)}):")
     for user in users:
-        print(f"  - {user.get('username')} / {user.get('password')}  px={user.get('px')}")
+        # Do not log Soft passwords (data secrets).
+        print(f"  - {user.get('username')}  px={user.get('px')}")
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
     try:
         httpd.serve_forever()
