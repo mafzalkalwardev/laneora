@@ -16,11 +16,18 @@ from app.auth import AuthSession
 from app.crypto_util import decrypt
 from app.services import (
     DAT,
+    DAT_3,
+    DAT_4,
     DAT_DUAL,
     DUAL_SEARCH_TABS,
+    MULTI_SEARCH_TABS,
     normalize_services,
+    opens_dat_search,
     require_services,
+    search_open_delay_ms,
+    search_tab_titles,
     search_url,
+    service_catalog,
 )
 from server.soft_shim import Handler, _build_auth_payload
 
@@ -38,14 +45,52 @@ class ServiceRulesTest(unittest.TestCase):
         self.assertEqual(require_services(["dat_dual", "dat"]), [DAT, DAT_DUAL])
         self.assertEqual(require_services("dat_dual"), [DAT_DUAL])
         self.assertEqual(normalize_services("dat,bogus,dat_dual"), [DAT, DAT_DUAL])
+        self.assertEqual(
+            require_services(["dat_4", "dat", "dat_3", "dat_dual"]),
+            [DAT, DAT_DUAL, DAT_3, DAT_4],
+        )
+        self.assertEqual(require_services("dat_3"), [DAT_3])
+        self.assertEqual(require_services("dat_4"), [DAT_4])
+        self.assertEqual(normalize_services("dat_4,bogus,dat_3"), [DAT_3, DAT_4])
+        self.assertEqual(normalize_services(["dat_6"]), [DAT])
+        self.assertEqual(normalize_services("dat_6,dat_3"), [DAT_3])
         with self.assertRaises(ValueError):
             require_services([])
         with self.assertRaises(ValueError):
             require_services(["nope"])
+        with self.assertRaises(ValueError):
+            require_services(["dat_6"])
+
+    def test_catalog_lists_each_module_once(self) -> None:
+        self.assertEqual(
+            [item["id"] for item in service_catalog()],
+            [DAT, DAT_DUAL, DAT_3, DAT_4],
+        )
 
     def test_dual_module_is_two_distinct_search_tabs(self) -> None:
         self.assertEqual(len(DUAL_SEARCH_TABS), 2)
         self.assertEqual(len(set(DUAL_SEARCH_TABS)), 2)
+        self.assertEqual(DUAL_SEARCH_TABS, ("Search 1", "Search 2"))
+
+    def test_three_and_four_open_that_many_distinct_tabs(self) -> None:
+        self.assertEqual(MULTI_SEARCH_TABS[DAT_DUAL], 2)
+        self.assertEqual(MULTI_SEARCH_TABS[DAT_3], 3)
+        self.assertEqual(search_tab_titles(3), ("Search 1", "Search 2", "Search 3"))
+        self.assertEqual(MULTI_SEARCH_TABS[DAT_4], 4)
+        titles = search_tab_titles(4)
+        self.assertEqual(titles, ("Search 1", "Search 2", "Search 3", "Search 4"))
+        self.assertEqual(len(set(titles)), 4)
+        self.assertNotIn("dat_6", MULTI_SEARCH_TABS)
+        self.assertTrue(opens_dat_search(DAT))
+        self.assertTrue(opens_dat_search(DAT_DUAL))
+        self.assertTrue(opens_dat_search(DAT_3))
+        self.assertTrue(opens_dat_search(DAT_4))
+        # Dual keeps the original simultaneous 400ms open. 3 and 4 stagger.
+        self.assertEqual(search_open_delay_ms(0, 2), 400)
+        self.assertEqual(search_open_delay_ms(1, 2), 400)
+        self.assertEqual(search_open_delay_ms(0, 4), 400)
+        self.assertEqual(search_open_delay_ms(3, 4), 400 + 3 * 350)
+        self.assertGreater(search_open_delay_ms(3, 4), search_open_delay_ms(1, 3))
 
     def test_search_url_matches_original_dat_rules(self) -> None:
         self.assertEqual(search_url({"url": "https://one.dat.com"}, "one"), "https://one.dat.com/search-loads")
@@ -64,6 +109,10 @@ class ServiceRulesTest(unittest.TestCase):
         self.assertEqual(session.services, [DAT, DAT_DUAL])
         session.resp["services"] = ["dat_dual"]
         self.assertEqual(session.services, [DAT_DUAL])
+        session.resp["services"] = "dat_4,dat_3"
+        self.assertEqual(session.services, [DAT_3, DAT_4])
+        session.resp["services"] = ["dat_3"]
+        self.assertEqual(session.services, [DAT_3])
 
     def test_existing_accounts_stay_on_dat_search(self) -> None:
         raw = json.loads((ROOT / "data" / "local_users.json").read_text(encoding="utf-8"))
@@ -102,11 +151,32 @@ class ServiceRulesTest(unittest.TestCase):
         self.assertEqual(plain["url"], "https://one.dat.com")
         self.assertIn("power", payload)
 
+    def test_three_and_four_still_include_the_shared_dat_session(self) -> None:
+        for service_id in (DAT_3, DAT_4):
+            user = {
+                "username": service_id,
+                "password": "secret",
+                "active_subs": ["power"],
+                "services": [service_id],
+                "px": "none",
+                "p": "0",
+                "pu": "",
+                "pd": "",
+                "streams": {"power": {"url": "https://power.dat.com", "store": [], "lst": "{}", "sst": ""}},
+            }
+            payload = _build_auth_payload(user)
+            self.assertEqual(payload["services"], service_id)
+            self.assertEqual(payload["active_subs"], "power")
+            plain = json.loads(decrypt(PASSPHRASE, payload["one"]))
+            self.assertEqual(plain["url"], "https://one.dat.com")
+            self.assertIn("power", payload)
+
     def test_original_screen_still_hides_its_single_tab(self) -> None:
         text = (ROOT / "app" / "window.py").read_text(encoding="utf-8")
         self.assertIn("self.tabs.tabBar().hide()", text)
         self.assertIn("QWebEngineProfile(view)", text)
-        self.assertIn("DUAL_SEARCH_TABS", text)
+        self.assertIn("def browse_dual", text)
+        self.assertIn("def browse_multi", text)
         html = (ROOT / "server" / "admin_dashboard.html").read_text(encoding="utf-8")
         self.assertIn('data-act="services"', html)
         self.assertIn('id="newServices"', html)
@@ -225,6 +295,136 @@ class AdminAssignmentTest(unittest.TestCase):
             timeout=10,
         )
         self.assertEqual(dual_auth.json()["services"], "dat_dual")
+
+    def test_admin_assigns_three_and_four_without_changing_other_users(self) -> None:
+        self._login()
+        for username, services in (
+            ("classic", None),
+            ("only3", [DAT_3]),
+            ("only4", [DAT_4]),
+        ):
+            body: dict = {"username": username, "password": "secret1", "plan": "day_1"}
+            if services is not None:
+                body["services"] = services
+            created = self.http.post(self.base + "/admin/api/users", json=body, timeout=10)
+            self.assertEqual(created.status_code, 200, created.text)
+
+        listed = self.http.get(self.base + "/admin/api/users", timeout=10).json()
+        by_name = {user["username"]: user["services"] for user in listed["users"]}
+        catalog = [item["id"] for item in listed["services"]]
+        self.assertEqual(catalog, [DAT, DAT_DUAL, DAT_3, DAT_4])
+        self.assertEqual(by_name["classic"], [DAT])
+        self.assertEqual(by_name["only3"], [DAT_3])
+        self.assertEqual(by_name["only4"], [DAT_4])
+        self.assertNotIn("dat_6", catalog)
+
+        both = self.http.post(
+            self.base + "/admin/api/users/update",
+            json={"username": "only3", "services": [DAT_4, DAT, DAT_3]},
+            timeout=10,
+        )
+        self.assertEqual(both.status_code, 200, both.text)
+        self.assertEqual(both.json()["user"]["services"], [DAT, DAT_3, DAT_4])
+
+        rejected = self.http.post(
+            self.base + "/admin/api/users/update",
+            json={"username": "only4", "services": []},
+            timeout=10,
+        )
+        self.assertEqual(rejected.status_code, 400)
+        unknown = self.http.post(
+            self.base + "/admin/api/users/update",
+            json={"username": "only4", "services": ["dat_6"]},
+            timeout=10,
+        )
+        self.assertEqual(unknown.status_code, 400)
+
+        after = {
+            user["username"]: user["services"]
+            for user in self.http.get(self.base + "/admin/api/users", timeout=10).json()["users"]
+        }
+        self.assertEqual(after["classic"], [DAT])
+        self.assertEqual(after["only3"], [DAT, DAT_3, DAT_4])
+        self.assertEqual(after["only4"], [DAT_4])
+
+        classic_auth = requests.get(
+            self.base + "/authenticate",
+            params={"username": "classic", "key": "secret1", "value": "1", "is_alive": "1"},
+            timeout=10,
+        )
+        three_auth = requests.get(
+            self.base + "/authenticate",
+            params={"username": "only3", "key": "secret1", "value": "2", "is_alive": "2"},
+            timeout=10,
+        )
+        four_auth = requests.get(
+            self.base + "/authenticate",
+            params={"username": "only4", "key": "secret1", "value": "3", "is_alive": "3"},
+            timeout=10,
+        )
+        self.assertEqual(classic_auth.json()["services"], DAT)
+        self.assertEqual(three_auth.json()["services"], "dat,dat_3,dat_4")
+        self.assertEqual(four_auth.json()["services"], DAT_4)
+        for response in (classic_auth, three_auth, four_auth):
+            plain = json.loads(decrypt(PASSPHRASE, response.json()["one"]))
+            self.assertIn("one.dat.com", plain["url"])
+
+    def test_cli_set_services_assigns_each_module(self) -> None:
+        import importlib.util
+
+        self._login()
+        for username in ("staydat", "threeuser", "fouruser", "dualuser"):
+            created = self.http.post(
+                self.base + "/admin/api/users",
+                json={"username": username, "password": "secret1", "plan": "week_1"},
+                timeout=10,
+            )
+            self.assertEqual(created.status_code, 200, created.text)
+            self.assertEqual(created.json()["user"]["services"], [DAT])
+
+        spec = importlib.util.spec_from_file_location("soft_admin_cli", ROOT / "scripts" / "soft_admin.py")
+        assert spec is not None and spec.loader is not None
+        cli = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cli)
+
+        def run_set(*args: str) -> int:
+            with patch("sys.argv", ["soft_admin.py", "set-services", *args]):
+                return cli.main()
+
+        self.assertEqual(run_set("threeuser", "dat_3"), 0)
+        self.assertEqual(run_set("fouruser", "dat_4"), 0)
+        self.assertEqual(run_set("dualuser", "dat_dual"), 0)
+        self.assertEqual(run_set("threeuser", "nope"), 1)
+        self.assertEqual(run_set("fouruser", "dat_6"), 1)
+        self.assertEqual(run_set("missinguser", "dat_3"), 1)
+
+        listed = {
+            user["username"]: user["services"]
+            for user in self.http.get(self.base + "/admin/api/users", timeout=10).json()["users"]
+        }
+        self.assertEqual(listed["staydat"], [DAT])
+        self.assertEqual(listed["threeuser"], [DAT_3])
+        self.assertEqual(listed["fouruser"], [DAT_4])
+        self.assertEqual(listed["dualuser"], [DAT_DUAL])
+
+        self.assertEqual(run_set("threeuser", "dat,dat_4"), 0)
+        listed = {
+            user["username"]: user["services"]
+            for user in self.http.get(self.base + "/admin/api/users", timeout=10).json()["users"]
+        }
+        self.assertEqual(listed["threeuser"], [DAT, DAT_4])
+        self.assertEqual(listed["fouruser"], [DAT_4])
+        self.assertEqual(listed["dualuser"], [DAT_DUAL])
+        self.assertEqual(listed["staydat"], [DAT])
+
+        auth = requests.get(
+            self.base + "/authenticate",
+            params={"username": "fouruser", "key": "secret1", "value": "9", "is_alive": "9"},
+            timeout=10,
+        )
+        self.assertEqual(auth.json()["services"], "dat_4")
+        plain = json.loads(decrypt(PASSPHRASE, auth.json()["one"]))
+        self.assertIn("one.dat.com", plain["url"])
 
 
 if __name__ == "__main__":

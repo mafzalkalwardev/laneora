@@ -33,7 +33,7 @@ Zip and send: `Laneora.exe` + `Laneora Soft.bat`
 1. Install / enable **Surfshark** with **your static US IP** (same as admin)  
 2. Run `Laneora Soft.bat` (or EXE after setting Soft URL)  
 3. Soft login you created in the admin dashboard (username and password you set there)  
-4. Open **DAT Search**. If your admin also turned on **Dual DAT Search**, that opens two search tabs you can switch between.
+4. Open the module your admin turned on. **DAT Search** is one screen. **Dual DAT Search**, **3 DAT Search**, and **4 DAT Search** open that many search tabs. You only see the ones that were checked for your login. A login refresh in one search tab is copied to the other tabs in that module.
 
 ## What you create for each client
 
@@ -42,6 +42,24 @@ python scripts\soft_admin.py add-user theirUser theirPass
 ```
 
 Tell them: Soft username + password + Soft server URL (in the bat file).
+
+## If the window is white
+
+The board page should not sit on a blank screen. Laneora shows what failed, a **Retry** button, and **Connection test**.
+
+Connection test is on the sign-in screen and on the module list. It checks DAT, the proxy when one is set, and a short download sample. It does not show passwords.
+
+The log file has no passwords or cookies. On Windows it is `%LOCALAPPDATA%\Laneora\laneora.log`. On a machine running from source it is `~/.laneora/laneora.log`. Send that file.
+
+If the graphics driver is the problem, close the app and start it again with lightweight mode:
+
+```bat
+Laneora.exe --lightweight
+```
+
+`--software-rendering` only turns off GPU compositing. `--lightweight` also loads the extra search tabs when they are opened, not all at once. A renderer crash turns on software rendering for the next start by itself.
+
+The usual silent blank page was the DAT session being wiped. The app used to delete browser cookies and then write the session back a moment later. On a slower or locked-down PC the delete finished last, so the page opened with no session and stayed white. That wipe is gone. Cookies are written onto a fresh browser profile with a real site address. `about:blank` is not treated as a loaded board page.
 
 ## Notes
 
