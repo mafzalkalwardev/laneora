@@ -8,6 +8,7 @@ from PyQt5.QtNetwork import QNetworkCookie
 from PyQt5.QtWebEngineWidgets import QWebEngineProfile, QWebEngineScript, QWebEngineView
 
 from app import USER_AGENT
+from app.webview_flow import cookie_origin
 
 # Proven on the shared DAT session: hide the side menu (Search Loads only)
 # and remove DAT's "logged in on another device" dialog. Do not click Login Anyway.
@@ -100,7 +101,7 @@ def apply_cookies(cookie_store, store: list[dict[str, Any]]) -> None:
                 qcookie.setExpirationDate(expiration_date)
         qcookie.setHttpOnly(bool(cookie.get("httpOnly", False)))
         qcookie.setSecure(bool(cookie.get("secure", False)))
-        cookie_store.setCookie(qcookie, QUrl())
+        cookie_store.setCookie(qcookie, QUrl(cookie_origin(str(cookie.get("domain") or ""))))
 
 
 def inject_local_storage(view: QWebEngineView, loc_str: str) -> None:

@@ -22,15 +22,17 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5.QtWebEngineWidgets import QWebEnginePage, QWebEngineProfile, QWebEngineView
 
 from app import APP_NAME, PASSPHRASE, POWER_DAT, SERVER_URL, SPEEDTEST_URL, __version__
 from app.auth import AuthError, AuthSession, authenticate, reauthenticate, start_logger_heartbeat
-from app.browser import apply_cookies, attach_checker_script, clear_profile, inject_local_storage
+from app.browser import apply_cookies, attach_checker_script, inject_local_storage
+from app.config import DATA_DIR
 from app.crypto_util import decrypt
 from app.roster import upsert_user
 from app.streams import apply_http_proxy
 from app.timezone_util import sync_timezone_from_ip
+from app.webview_flow import describe_navigation, on_load_event
 
 
 def resource_path(relative_path: str) -> str:
@@ -231,19 +233,33 @@ class MainWindow(QMainWindow):
     def browse(self, br: str, px, p, pu, pd, opt: str, fc: int = 0) -> None:
         self.remove_all_widgets()
         self.current_sub = opt
+        self._page_status = QLabel("Opening DAT…")
+        self._page_status.setWordWrap(True)
+        self.layout.addWidget(self._page_status)
         self.tabs = QTabWidget()
         self.layout.addWidget(self.tabs)
         self.tabs.setDocumentMode(True)
         self.tabs.tabBar().hide()
 
         px, pu, pd = str(px), str(pu), str(pd)
-        p = int(p)
+        self._proxy_host = px
+        try:
+            p = int(p)
+        except (TypeError, ValueError):
+            self._page_status.setText("DAT did not open: proxy port from the server is not a number.")
+            self._write_diag("result=fail url= reason=proxy_port")
+            return
         apply_http_proxy(px, p, pu, pd)
 
         if fc == 1:
             threading.Thread(target=self._timezone_worker, daemon=True).start()
 
-        full_make = json.loads(decrypt(PASSPHRASE, br))
+        try:
+            full_make = json.loads(decrypt(PASSPHRASE, br))
+        except Exception as exc:  # noqa: BLE001
+            self._page_status.setText("DAT did not open: the session blob could not be read.")
+            self._write_diag(f"result=fail url= reason=decrypt {type(exc).__name__}")
+            return
         self.make_tab(full_make, opt)
 
     def _timezone_worker(self) -> None:
@@ -264,16 +280,20 @@ class MainWindow(QMainWindow):
     def make_tab(self, full_make: dict[str, Any], opt: str) -> None:
         assert self.tabs is not None
         self.browser = QWebEngineView()
+        # Private profile starts empty. deleteAllCookies on the shared profile
+        # is async and can erase cookies after they are set, leaving a blank page.
+        profile = QWebEngineProfile(self.browser)
+        self.browser.setPage(QWebEnginePage(profile, self.browser))
         attach_checker_script(self.browser)
         self.browser.loadProgress.connect(self.on_load_progress)
         self.browser.loadFinished.connect(self.on_load_finished)
         self.success = 0
+        self._nav_started = False
 
         if "power" in (opt or "").lower():
             self.url = POWER_DAT
         else:
             raw = str(full_make.get("url") or "")
-            # DAT One opens Search Loads only. Other side tabs stay hidden via the checker.
             if "one.dat.com" in raw:
                 self.url = "https://one.dat.com/search-loads"
             else:
@@ -285,23 +305,30 @@ class MainWindow(QMainWindow):
             self.lst = json.dumps(self.lst)
         self.sst = str(full_make.get("sst") or "")
 
-        profile = self.browser.page().profile()
         self.cookieStore = profile.cookieStore()
-        # deleteAllCookies is async. Setting cookies in the same turn gets wiped
-        # and DAT stays on a blank page. Apply the session after the delete runs.
-        self.cookieStore.deleteAllCookies()
-        clear_profile(profile)
         url = self.url
         store = list(self.store)
         cookie_store = self.cookieStore
+        self._pending_cookies = len(store)
+        self._write_diag(describe_navigation(url, getattr(self, "_proxy_host", ""), store))
 
         def _open_stream() -> None:
-            if self.browser is None:
+            if self.browser is None or self._nav_started:
                 return
-            apply_cookies(cookie_store, store)
+            self._nav_started = True
             self.browser.load(QUrl(url))
 
-        QTimer.singleShot(400, _open_stream)
+        def _cookie_added(_cookie) -> None:
+            self._pending_cookies -= 1
+            if self._pending_cookies <= 0:
+                _open_stream()
+
+        if store:
+            cookie_store.cookieAdded.connect(_cookie_added)
+            apply_cookies(cookie_store, store)
+            QTimer.singleShot(1500, _open_stream)
+        else:
+            _open_stream()
         i = self.tabs.addTab(self.browser, "Screen")
         self.tabs.setCurrentIndex(i)
 
@@ -318,13 +345,33 @@ class MainWindow(QMainWindow):
         self.tabs.setCurrentIndex(i)
 
     def on_load_finished(self, ok: bool) -> None:
-        if self.success:
+        if self.browser is None:
             return
-        if ok and self.browser is not None:
+        current = self.browser.url().toString()
+        action = on_load_event(current, bool(ok), bool(self.success))
+        self._write_diag(
+            describe_navigation(current, getattr(self, "_proxy_host", ""), getattr(self, "store", []), ok=bool(ok))
+            + f" action={action}"
+        )
+        if action == "ignore":
+            return
+        if action == "inject":
             self.success = 1
             inject_local_storage(self.browser, self.lst)
-        elif self.browser is not None:
-            self.browser.setUrl(QUrl(self.browser.url().toString()))
+            if getattr(self, "_page_status", None) is not None:
+                self._page_status.setText("DAT loaded.")
+            return
+        if getattr(self, "_page_status", None) is not None:
+            self._page_status.setText(f"DAT page failed to load: {current}")
+
+    def _write_diag(self, line: str) -> None:
+        try:
+            path = DATA_DIR / "webview_diag.log"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(line.replace("\n", " ") + "\n")
+        except OSError as exc:
+            print("webview diag:", type(exc).__name__)
 
     def on_load_progress(self, progress: int) -> None:
         print(f"Page loading progress: {progress}%")
