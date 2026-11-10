@@ -11,6 +11,7 @@ from typing import Any, Callable
 import requests
 
 from app.config import SERVER_URL, SOFT_FALLBACK, SOFT_FALLBACK_URL
+from app.services import DAT, normalize_services
 
 _WS_RE = re.compile(r"^[\s\u200B\u00A0]+|[\s\u200B\u00A0]+$")
 
@@ -60,6 +61,13 @@ class AuthSession:
     def active_subs(self) -> list[str]:
         raw = str(self.resp.get("active_subs", "") or "")
         return [s for s in raw.split(",") if s]
+
+    @property
+    def services(self) -> list[str]:
+        """Modules this login may open. Older servers omit the field; that is DAT Search only."""
+        if "services" not in self.resp:
+            return [DAT]
+        return normalize_services(self.resp.get("services"))
 
 
 class AuthError(Exception):

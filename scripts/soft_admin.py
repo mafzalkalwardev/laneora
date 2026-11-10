@@ -19,11 +19,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from app.services import normalize_services  # noqa: E402
 from server.soft_admin_lib import (  # noqa: E402
     check_egress_ip,
     import_dat_store,
     load_config,
     load_local_users,
+    set_account_services,
     set_multi_screen,
     set_shared_proxy,
     upsert_account,
@@ -48,7 +50,9 @@ def cmd_status(_: argparse.Namespace) -> int:
             f"  - {user.get('username')}  active={user.get('active', True)}  "
             f"plan={user.get('plan_label') or 'no plan'}  "
             f"ends={user.get('subscription_end') or '—'}  "
-            f"subs={user.get('active_subs')}  px={user.get('px')}  cookies={store_counts}"
+            f"subs={user.get('active_subs')}  "
+            f"services={','.join(normalize_services(user.get('services') if 'services' in user else None))}  "
+            f"px={user.get('px')}  cookies={store_counts}"
         )
     print()
     print("Same IP on every PC requires a real shared HTTP proxy (not px=none).")
@@ -91,8 +95,29 @@ def cmd_check_ip(_: argparse.Namespace) -> int:
 
 def cmd_add_user(args: argparse.Namespace) -> int:
     streams = [s.strip() for s in (args.streams or "one,power").split(",") if s.strip()]
-    user = upsert_account(args.username, args.password, streams=streams)
-    print("saved", user.get("username"), "subs=", user.get("active_subs"), "px=", user.get("px"))
+    services = None
+    if str(args.services or "").strip():
+        services = [s.strip() for s in str(args.services).split(",") if s.strip()]
+    user = upsert_account(args.username, args.password, streams=streams, services=services)
+    assigned = normalize_services(user.get("services") if "services" in user else None)
+    print(
+        "saved",
+        user.get("username"),
+        "subs=",
+        user.get("active_subs"),
+        "services=",
+        ",".join(assigned),
+        "px=",
+        user.get("px"),
+    )
+    return 0
+
+
+def cmd_set_services(args: argparse.Namespace) -> int:
+    services = [s.strip() for s in str(args.services).split(",") if s.strip()]
+    user = set_account_services(args.username, services)
+    print(user.get("username"), "services=", ",".join(user.get("services") or []))
+    print("The dispatcher sees this on the next Laneora login.")
     return 0
 
 
@@ -171,7 +196,17 @@ def main() -> int:
     p.add_argument("username")
     p.add_argument("password")
     p.add_argument("--streams", default="one,power", help="Comma stream names (default one,power)")
+    p.add_argument(
+        "--services",
+        default="",
+        help="Comma service ids to assign (dat, dat_dual). Omit to leave the login on its current modules.",
+    )
     p.set_defaults(func=cmd_add_user)
+
+    p = sub.add_parser("set-services", help="Assign which modules a login can open")
+    p.add_argument("username")
+    p.add_argument("services", help="Comma service ids, for example dat,dat_dual")
+    p.set_defaults(func=cmd_set_services)
 
     p = sub.add_parser("import-store", help="Import DAT cookie jar into a Soft user's stream")
     p.add_argument("username", help="Soft username")

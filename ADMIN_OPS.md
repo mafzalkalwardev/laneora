@@ -56,6 +56,26 @@ python scripts\soft_admin.py multi-screen off
 
 Clients pick up the new cookies on **next Soft login** or **Reconnect!** in Laneora.
 
+## Assign services (modules)
+
+The desktop app can hold more than one module. The admin decides which ones each login sees.
+
+| Service id | What the dispatcher sees |
+| --- | --- |
+| `dat` | Original module: one DAT search screen |
+| `dat_dual` | Dual DAT Search: two search tabs, each with its own session |
+
+Existing accounts with no `services` field stay on `dat`. New users created on the admin page start on DAT Search unless you also check Dual DAT Search.
+
+On `http://127.0.0.1:8787/admin`, each user card has service checkboxes. Check the modules that login should see, then **Save services**. The dispatcher picks them up on the next Laneora login.
+
+```powershell
+python scripts\soft_admin.py set-services CLIENTUSER dat,dat_dual
+python scripts\soft_admin.py status
+```
+
+`set-services CLIENTUSER dat` puts that login back on the original module only.
+
 ## Soft server URL for clients
 
 Clients must reach your Soft shim, e.g.:

@@ -102,6 +102,9 @@
     .meta { color: var(--muted); font-size: 13px; margin: 8px 0 12px; line-height: 1.5; }
     .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
     .row input, .row select { width: auto; flex: 1; min-width: 140px; padding: 8px 10px; }
+    .checks { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 8px; }
+    .checks label { display: flex; align-items: center; gap: 8px; font-weight: 600; margin: 0; }
+    .checks input { width: auto; accent-color: var(--amber); }
     .pass { font-family: Consolas, monospace; }
     #toast { color: var(--ok); min-height: 1.2em; margin: 8px 0 0; }
     @media (max-width: 860px) {
@@ -146,6 +149,9 @@
         <input id="newPass" required />
         <label for="newPlan">Plan</label>
         <select id="newPlan"></select>
+        <label>Services</label>
+        <div class="checks" id="newServices"></div>
+        <p class="hint" id="serviceHint"></p>
         <p class="error" id="createError"></p>
         <button class="btn block" type="submit">Create user</button>
         <h2 style="margin-top:28px">Dashboard password</h2>
@@ -159,7 +165,7 @@
       </form>
       <section>
         <h2>All users</h2>
-        <p class="hint">No plan means the account can still log in. After you apply a plan, the next login is refused once the end time has passed. An open Laneora window stays open until they sign in again.</p>
+        <p class="hint">No plan means the account can still log in. After you apply a plan, the next login is refused once the end time has passed. An open Laneora window stays open until they sign in again. Services are the modules that login can open. Accounts with no service list stay on DAT Search.</p>
         <input id="filter" placeholder="Search users" style="margin: 8px 0 14px" />
         <div id="users"></div>
       </section>
@@ -169,6 +175,7 @@
     if ("scrollRestoration" in history) history.scrollRestoration = "manual";
     const $ = (id) => document.getElementById(id);
     let plans = [];
+    let services = [];
     let users = [];
 
     function esc(value) {
@@ -215,6 +222,24 @@
       ).join("");
     }
 
+    function serviceChecks(selected) {
+      const chosen = new Set(selected && selected.length ? selected : ["dat"]);
+      return services.map((svc) => `
+        <label><input type="checkbox" value="${esc(svc.id)}"${chosen.has(svc.id) ? " checked" : ""}/> ${esc(svc.label)}</label>
+      `).join("");
+    }
+
+    function checkedServices(scope) {
+      return [...scope.querySelectorAll("input[type=checkbox]:checked")].map((el) => el.value);
+    }
+
+    function serviceLabel(ids) {
+      return (ids && ids.length ? ids : ["dat"]).map((id) => {
+        const svc = services.find((item) => item.id === id);
+        return svc ? svc.label : id;
+      }).join(", ");
+    }
+
     function render() {
       const counts = { total: users.length, active: 0, expired: 0, unset: 0 };
       users.forEach((user) => { if (counts[user.status] != null) counts[user.status] += 1; });
@@ -238,7 +263,12 @@
           <div class="meta">
             Password <span class="pass">${esc(user.password)}</span><br>
             ${esc(user.plan_label || "No plan")} · ${esc(remaining(user.remaining_seconds))}<br>
-            Ends ${esc(when(user.subscription_end))} · ${user.cookies} session cookies
+            Ends ${esc(when(user.subscription_end))} · ${user.cookies} session cookies<br>
+            Services ${esc(serviceLabel(user.services))}
+          </div>
+          <div class="checks" data-svc>${serviceChecks(user.services)}</div>
+          <div class="row">
+            <button class="btn ghost small" type="button" data-act="services">Save services</button>
           </div>
           <div class="row">
             <select data-plan>${planOptions(user.plan || "month_1")}</select>
@@ -258,8 +288,11 @@
     async function load() {
       const data = await api("/admin/api/users");
       plans = data.plans;
+      services = data.services || [];
       users = data.users;
       $("newPlan").innerHTML = planOptions("month_1");
+      $("newServices").innerHTML = serviceChecks(["dat"]);
+      $("serviceHint").textContent = services.map((svc) => svc.label + " — " + svc.description).join(" ");
       render();
     }
 
@@ -289,7 +322,8 @@
         await api("/admin/api/users", {
           username: $("newUser").value,
           password: $("newPass").value,
-          plan: $("newPlan").value
+          plan: $("newPlan").value,
+          services: checkedServices($("newServices"))
         });
         $("newUser").value = "";
         $("newPass").value = "";
@@ -324,9 +358,12 @@
 
     api("/admin/api/users").then((data) => {
       plans = data.plans;
+      services = data.services || [];
       users = data.users;
       showAdmin();
       $("newPlan").innerHTML = planOptions("month_1");
+      $("newServices").innerHTML = serviceChecks(["dat"]);
+      $("serviceHint").textContent = services.map((svc) => svc.label + " — " + svc.description).join(" ");
       render();
     }).catch(() => {});
 
@@ -342,6 +379,11 @@
         if (act === "delete") {
           if (!confirm("Delete " + username + "?")) return;
           await api("/admin/api/users/delete", { username });
+        } else if (act === "services") {
+          await api("/admin/api/users/update", {
+            username,
+            services: checkedServices(card.querySelector("[data-svc]"))
+          });
         } else if (act === "toggle") {
           const user = users.find((item) => item.username === username);
           await api("/admin/api/users/update", { username, active: !user.active });
