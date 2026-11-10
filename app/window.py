@@ -38,6 +38,7 @@ from app.services import (
     search_url,
     service_by_id,
 )
+from app.session_sync import ProfileSessionSync
 from app.streams import apply_http_proxy
 from app.timezone_util import sync_timezone_from_ip
 
@@ -91,6 +92,7 @@ class MainWindow(QMainWindow):
         self._view_states: list[dict[str, Any]] = []
         self._search_timers: list[QTimer] = []
         self._search_generation = 0
+        self._session_sync: ProfileSessionSync | None = None
 
         for name in ("mark.png", "logo.png", "app.ico"):
             icon_path = resource_path(name)
@@ -217,15 +219,18 @@ class MainWindow(QMainWindow):
     def _cancel_pending_searches(self) -> None:
         """Drop search opens that have not run yet.
 
-        3-search and 6-search stagger later tabs by up to about two seconds.
-        Switching modules deletes those views immediately after, and a leftover
-        timer would apply cookies to a view Qt has already destroyed.
+        3-search and 4-search stagger later tabs by up to about a second and a
+        half. Switching modules deletes those views immediately after, and a
+        leftover timer would apply cookies to a view Qt has already destroyed.
         """
         for timer in self._search_timers:
             timer.stop()
             timer.deleteLater()
         self._search_timers = []
         self._search_generation += 1
+        if self._session_sync is not None:
+            self._session_sync.close()
+            self._session_sync = None
 
     def _schedule_search_open(self, delay_ms: int, callback) -> None:
         generation = self._search_generation
@@ -387,8 +392,9 @@ class MainWindow(QMainWindow):
 
         full_make = json.loads(decrypt(PASSPHRASE, br))
         # Dual search keeps the original uncapped cache. Larger modules cap it
-        # so six profiles cannot each grow an unbounded memory cache.
+        # so four profiles cannot each grow an unbounded memory cache.
         cap_cache = count > MULTI_SEARCH_TABS[DAT_DUAL]
+        self._session_sync = ProfileSessionSync()
         for index, title in enumerate(search_tab_titles(count)):
             self._mount_independent_search(
                 full_make,
@@ -396,6 +402,7 @@ class MainWindow(QMainWindow):
                 open_delay_ms=search_open_delay_ms(index, count),
                 cap_cache=cap_cache,
             )
+        self._session_sync.start()
         self.tabs.setCurrentIndex(0)
         current = self.tabs.currentWidget()
         if isinstance(current, QWebEngineView):
@@ -480,11 +487,11 @@ class MainWindow(QMainWindow):
         open_delay_ms: int = 400,
         cap_cache: bool = False,
     ) -> None:
-        """One DAT search tab with its own cookie jar and storage.
+        """One DAT search tab with its own profile.
 
         The captured session and the app proxy are the same ones the single
-        search uses. The profile is off-the-record so the tabs do not share
-        navigation or local storage.
+        search uses. Navigation stays on this profile. Login cookies and auth
+        tokens are copied to the module's other tabs when they change.
         """
         assert self.tabs is not None
         view = QWebEngineView()
@@ -503,6 +510,8 @@ class MainWindow(QMainWindow):
             lst = json.dumps(lst)
 
         cookie_store = profile.cookieStore()
+        if self._session_sync is not None:
+            self._session_sync.watch(profile, view)
         # deleteAllCookies is async. Setting cookies in the same turn gets wiped.
         cookie_store.deleteAllCookies()
         clear_profile(profile)
@@ -526,10 +535,13 @@ class MainWindow(QMainWindow):
             cookie_store=cookie_store,
             store: list[dict[str, Any]] = store,
             url: str = url,
+            profile: QWebEngineProfile = profile,
         ) -> None:
             if _qt_object_deleted(view):
                 return
             apply_cookies(cookie_store, store)
+            if self._session_sync is not None:
+                self._session_sync.note_opened(profile)
             view.load(QUrl(url))
 
         self._schedule_search_open(open_delay_ms, _open)

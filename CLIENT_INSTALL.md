@@ -33,7 +33,7 @@ Zip and send: `Laneora.exe` + `Laneora Soft.bat`
 1. Install / enable **Surfshark** with **your static US IP** (same as admin)  
 2. Run `Laneora Soft.bat` (or EXE after setting Soft URL)  
 3. Soft login you created in the admin dashboard (username and password you set there)  
-4. Open the module your admin turned on. **DAT Search** is one screen. **Dual DAT Search**, **3 DAT Search**, and **6 DAT Search** open that many search tabs. You only see the ones that were checked for your login.
+4. Open the module your admin turned on. **DAT Search** is one screen. **Dual DAT Search**, **3 DAT Search**, and **4 DAT Search** open that many search tabs. You only see the ones that were checked for your login. A login refresh in one search tab is copied to the other tabs in that module.
 
 ## What you create for each client
 

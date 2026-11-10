@@ -1,21 +1,19 @@
 """Modules an admin can turn on per Laneora login.
 
 `dat` is the original client: one DAT One search screen. The multi-search
-modules open two, three, or six DAT search tabs. Each tab uses its own browser
-profile so the searches do not share cookies, storage, or navigation. Every
-tab still receives the same shared DAT session and the same proxy.
+modules open two, three, or four DAT search tabs. Each tab uses its own
+browser profile so the searches do not share navigation or search storage.
+Cookies and auth tokens are copied between the tabs of the open module, so a
+login refresh in one tab updates the others. Every tab still starts from the
+same shared DAT session and the same proxy.
 
 A missing or empty service list means `[dat]`. Existing accounts keep the
 original module until an admin assigns something else.
 
-Six tabs is the ceiling. Each tab is its own off-the-record Chromium profile,
-so nothing is written to a profile directory. Six tabs that reached the DAT
-login page used about 1.1 GB for the whole client in a local check, peaking
-near 1.25 GB. A signed-in search, with the map and the load table, will use
-more. Assign the six-search module only on a PC that has that memory free.
-The tabs hold separate copies of the shared session, so a board that rotates
-a refresh token can leave the later tabs stale. Dual DAT Search already works
-this way.
+Four tabs is the largest module. Each tab is an off-the-record Chromium
+profile, so nothing is written to a profile directory. Four tabs that reached
+the DAT login page used about 1.0 GB for the whole client in a local check.
+A signed-in search, with the map and the load table, uses more.
 """
 from __future__ import annotations
 
@@ -26,19 +24,19 @@ from app import POWER_DAT
 DAT = "dat"
 DAT_DUAL = "dat_dual"
 DAT_3 = "dat_3"
-DAT_6 = "dat_6"
+DAT_4 = "dat_4"
 
 # How many isolated search tabs each multi-search module opens.
 MULTI_SEARCH_TABS: dict[str, int] = {
     DAT_DUAL: 2,
     DAT_3: 3,
-    DAT_6: 6,
+    DAT_4: 4,
 }
 
 ONE_SEARCH_URL = "https://one.dat.com/search-loads"
 
-# Dual search keeps the original simultaneous open. Larger modules stagger
-# later tabs so six profiles do not all parse the board at the same instant.
+# Dual search keeps the original simultaneous open. Three and four searches
+# stagger later tabs so the profiles do not all parse the board at once.
 SEARCH_OPEN_DELAY_MS = 400
 SEARCH_TAB_STAGGER_MS = 350
 
@@ -72,21 +70,21 @@ SERVICES: list[dict[str, str]] = [
         "label": "Dual DAT Search",
         "short": "Dual Search",
         "button": "Dual DAT Search",
-        "description": "Two DAT search tabs. Each tab is its own search session.",
+        "description": "Two DAT search tabs. Searches stay separate. A refreshed login is copied to every tab.",
     },
     {
         "id": DAT_3,
         "label": "3 DAT Search",
         "short": "3 Search",
         "button": "3 DAT Search",
-        "description": "Three DAT search tabs. Each tab is its own search session.",
+        "description": "Three DAT search tabs. Searches stay separate. A refreshed login is copied to every tab.",
     },
     {
-        "id": DAT_6,
-        "label": "6 DAT Search",
-        "short": "6 Search",
-        "button": "6 DAT Search",
-        "description": "Six DAT search tabs. Each tab is its own search session.",
+        "id": DAT_4,
+        "label": "4 DAT Search",
+        "short": "4 Search",
+        "button": "4 DAT Search",
+        "description": "Four DAT search tabs. Searches stay separate. A refreshed login is copied to every tab.",
     },
 ]
 

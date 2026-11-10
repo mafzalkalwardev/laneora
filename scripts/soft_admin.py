@@ -203,13 +203,13 @@ def main() -> int:
     p.add_argument(
         "--services",
         default="",
-        help="Comma service ids to assign (dat, dat_dual, dat_3, dat_6). Omit to leave the login on its current modules.",
+        help="Comma service ids to assign (dat, dat_dual, dat_3, dat_4). Omit to leave the login on its current modules.",
     )
     p.set_defaults(func=cmd_add_user)
 
     p = sub.add_parser("set-services", help="Assign which modules a login can open")
     p.add_argument("username")
-    p.add_argument("services", help="Comma service ids, for example dat,dat_dual or dat_3 or dat_6")
+    p.add_argument("services", help="Comma service ids, for example dat,dat_dual or dat_3 or dat_4")
     p.set_defaults(func=cmd_set_services)
 
     p = sub.add_parser("import-store", help="Import DAT cookie jar into a Soft user's stream")

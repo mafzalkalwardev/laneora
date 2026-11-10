@@ -29,7 +29,7 @@ else:
 from app import PASSPHRASE
 from app.auth import AuthSession
 from app.crypto_util import encrypt
-from app.services import DAT, DAT_3, DAT_6, DAT_DUAL
+from app.services import DAT, DAT_3, DAT_4, DAT_DUAL
 
 
 def _layout_buttons(window) -> list[str]:
@@ -95,13 +95,13 @@ class WindowModuleTest(unittest.TestCase):
     def test_picker_shows_only_the_modules_assigned_to_this_login(self) -> None:
         cases = {
             DAT_3: ["3 DAT Search"],
-            DAT_6: ["6 DAT Search"],
-            f"{DAT_6},{DAT_3}": ["3 DAT Search", "6 DAT Search"],
-            f"{DAT},{DAT_DUAL},{DAT_3},{DAT_6}": [
+            DAT_4: ["4 DAT Search"],
+            f"{DAT_4},{DAT_3}": ["3 DAT Search", "4 DAT Search"],
+            f"{DAT},{DAT_DUAL},{DAT_3},{DAT_4}": [
                 "Load DAT Stream",
                 "Dual DAT Search",
                 "3 DAT Search",
-                "6 DAT Search",
+                "4 DAT Search",
             ],
         }
         for raw, expected in cases.items():
@@ -141,29 +141,33 @@ class WindowModuleTest(unittest.TestCase):
         self.window.browse_dual(self.blob, "none", 0, "", "", 0)
         self._assert_isolated_tabs(2, cache_capped=False)
         self.assertEqual(self.window.findChildren(QToolBar), [])
+        self.assertEqual(self.window._session_sync.store_count, 2)
 
-    def test_three_and_six_open_separate_profiles(self) -> None:
+    def test_three_and_four_open_separate_profiles(self) -> None:
         session = AuthSession(
             "ada",
             "secret",
             1,
             1,
-            {**self.base, "services": f"{DAT},{DAT_DUAL},{DAT_3},{DAT_6}"},
+            {**self.base, "services": f"{DAT},{DAT_DUAL},{DAT_3},{DAT_4}"},
         )
         self.window.session = session
-        self.window._services = [DAT, DAT_DUAL, DAT_3, DAT_6]
+        self.window._services = [DAT, DAT_DUAL, DAT_3, DAT_4]
         self.window.open_service(DAT_3)
         self.assertEqual(self.window._open_mode, DAT_3)
         self._assert_isolated_tabs(3, cache_capped=True)
+        self.assertEqual(self.window._session_sync.store_count, 3)
         self.app.processEvents()
-        self.window.open_service(DAT_6)
-        self.assertEqual(self.window._open_mode, DAT_6)
-        self._assert_isolated_tabs(6, cache_capped=True)
+        self.window.open_service(DAT_4)
+        self.assertEqual(self.window._open_mode, DAT_4)
+        self._assert_isolated_tabs(4, cache_capped=True)
+        self.assertEqual(self.window._session_sync.store_count, 4)
         labels = [button.text() for button in self.window.findChildren(QPushButton)]
         self.assertIn("3 Search", labels)
-        self.assertIn("6 Search", labels)
+        self.assertIn("4 Search", labels)
         self.assertIn("Dual Search", labels)
         self.assertIn("DAT Search", labels)
+        self.assertNotIn("6 Search", labels)
 
     def test_original_module_still_hides_the_tab_bar(self) -> None:
         session = AuthSession("ada", "secret", 1, 1, {**self.base, "services": f"{DAT},{DAT_DUAL}"})
@@ -175,16 +179,17 @@ class WindowModuleTest(unittest.TestCase):
         self.assertEqual(self.window.tabs.tabText(0), "Screen")
         self.assertEqual(self.window.findChildren(QToolBar), [])
 
-        self.window._services = [DAT, DAT_DUAL, DAT_3, DAT_6]
+        self.window._services = [DAT, DAT_DUAL, DAT_3, DAT_4]
         self.window.browse(self.blob, "none", 0, "", "", "one", 0)
         self.assertEqual(self.window.tabs.count(), 1)
         self.assertTrue(self.window.tabs.tabBar().isHidden())
         self.assertEqual(self.window.tabs.tabText(0), "Screen")
+        self.assertIsNone(self.window._session_sync)
         labels = [button.text() for button in self.window.findChildren(QPushButton)]
         self.assertIn("DAT Search", labels)
         self.assertIn("Dual Search", labels)
         self.assertIn("3 Search", labels)
-        self.assertIn("6 Search", labels)
+        self.assertIn("4 Search", labels)
 
     def test_switching_modules_cancels_staggered_opens(self) -> None:
         from PyQt5.QtCore import QEventLoop, QTimer
@@ -194,13 +199,13 @@ class WindowModuleTest(unittest.TestCase):
             "secret",
             1,
             1,
-            {**self.base, "services": f"{DAT},{DAT_6}"},
+            {**self.base, "services": f"{DAT},{DAT_4}"},
         )
         self.window.session = session
-        self.window._services = [DAT, DAT_6]
-        self.window.open_service(DAT_6)
+        self.window._services = [DAT, DAT_4]
+        self.window.open_service(DAT_4)
         pending = list(self.window._search_timers)
-        self.assertEqual(len(pending), 6)
+        self.assertEqual(len(pending), 4)
         self.assertTrue(all(timer.isActive() for timer in pending))
 
         self.window.open_service(DAT)
@@ -216,6 +221,16 @@ class WindowModuleTest(unittest.TestCase):
         self.assertEqual(self.window.tabs.count(), 1)
         self.assertTrue(self.window.tabs.tabBar().isHidden())
         self.assertEqual(self.window.tabs.tabText(0), "Screen")
+
+        self.window.open_service(DAT_4)
+        self.assertEqual(self.window.tabs.count(), 4)
+        self.assertFalse(self.window.tabs.tabBar().isHidden())
+        self.assertEqual(
+            [self.window.tabs.tabText(i) for i in range(4)],
+            ["Search 1", "Search 2", "Search 3", "Search 4"],
+        )
+        self.assertEqual(self.window._session_sync.store_count, 4)
+        self.assertFalse(self.window._session_sync.closed)
 
 
 if __name__ == "__main__":
