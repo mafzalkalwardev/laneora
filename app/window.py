@@ -42,6 +42,15 @@ from app.streams import apply_http_proxy
 from app.timezone_util import sync_timezone_from_ip
 
 
+def _qt_object_deleted(obj: object) -> bool:
+    """True once Qt has destroyed the C++ object behind this wrapper."""
+    try:
+        from PyQt5 import sip
+    except ImportError:
+        return False
+    return sip.isdeleted(obj)
+
+
 def resource_path(relative_path: str) -> str:
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
@@ -80,6 +89,8 @@ class MainWindow(QMainWindow):
         self._services: list[str] = [DAT]
         self._open_mode = DAT
         self._view_states: list[dict[str, Any]] = []
+        self._search_timers: list[QTimer] = []
+        self._search_generation = 0
 
         for name in ("mark.png", "logo.png", "app.ico"):
             icon_path = resource_path(name)
@@ -203,7 +214,35 @@ class MainWindow(QMainWindow):
         )
         threading.Timer(10.0, lambda: (QApplication.quit(), self.stop_task())).start()
 
+    def _cancel_pending_searches(self) -> None:
+        """Drop search opens that have not run yet.
+
+        3-search and 6-search stagger later tabs by up to about two seconds.
+        Switching modules deletes those views immediately after, and a leftover
+        timer would apply cookies to a view Qt has already destroyed.
+        """
+        for timer in self._search_timers:
+            timer.stop()
+            timer.deleteLater()
+        self._search_timers = []
+        self._search_generation += 1
+
+    def _schedule_search_open(self, delay_ms: int, callback) -> None:
+        generation = self._search_generation
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+
+        def _run(generation: int = generation, callback=callback) -> None:
+            if generation != self._search_generation:
+                return
+            callback()
+
+        timer.timeout.connect(_run)
+        timer.start(delay_ms)
+        self._search_timers.append(timer)
+
     def remove_all_widgets(self) -> None:
+        self._cancel_pending_searches()
         while self.layout.count():
             item = self.layout.takeAt(0)
             widget = item.widget()
@@ -429,7 +468,7 @@ class MainWindow(QMainWindow):
             apply_cookies(cookie_store, store)
             self.browser.load(QUrl(url))
 
-        QTimer.singleShot(400, _open_stream)
+        self._schedule_search_open(400, _open_stream)
         i = self.tabs.addTab(self.browser, "Screen")
         self.tabs.setCurrentIndex(i)
 
@@ -488,10 +527,12 @@ class MainWindow(QMainWindow):
             store: list[dict[str, Any]] = store,
             url: str = url,
         ) -> None:
+            if _qt_object_deleted(view):
+                return
             apply_cookies(cookie_store, store)
             view.load(QUrl(url))
 
-        QTimer.singleShot(open_delay_ms, _open)
+        self._schedule_search_open(open_delay_ms, _open)
         self.tabs.addTab(view, title)
 
     def speedtest(self) -> None:

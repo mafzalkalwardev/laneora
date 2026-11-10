@@ -186,6 +186,37 @@ class WindowModuleTest(unittest.TestCase):
         self.assertIn("3 Search", labels)
         self.assertIn("6 Search", labels)
 
+    def test_switching_modules_cancels_staggered_opens(self) -> None:
+        from PyQt5.QtCore import QEventLoop, QTimer
+
+        session = AuthSession(
+            "ada",
+            "secret",
+            1,
+            1,
+            {**self.base, "services": f"{DAT},{DAT_6}"},
+        )
+        self.window.session = session
+        self.window._services = [DAT, DAT_6]
+        self.window.open_service(DAT_6)
+        pending = list(self.window._search_timers)
+        self.assertEqual(len(pending), 6)
+        self.assertTrue(all(timer.isActive() for timer in pending))
+
+        self.window.open_service(DAT)
+        self.assertTrue(all(not timer.isActive() for timer in pending))
+        self.assertEqual(self.window.tabs.count(), 1)
+        self.assertEqual(self.window.tabs.tabText(0), "Screen")
+        replacement = [timer for timer in self.window._search_timers if timer.isActive()]
+        self.assertEqual(len(replacement), 1)
+
+        loop = QEventLoop()
+        QTimer.singleShot(2300, loop.quit)
+        loop.exec_()
+        self.assertEqual(self.window.tabs.count(), 1)
+        self.assertTrue(self.window.tabs.tabBar().isHidden())
+        self.assertEqual(self.window.tabs.tabText(0), "Screen")
+
 
 if __name__ == "__main__":
     unittest.main()
