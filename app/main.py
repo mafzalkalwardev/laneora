@@ -24,7 +24,7 @@ def _windows_app_id() -> None:
         pass
 
 
-def _logo_icon() -> QIcon:
+def _logo_icon(resource_path) -> QIcon:
     for name in ("mark.png", "logo.png", "app.ico"):
         path = resource_path(name)
         if os.path.exists(path):
@@ -66,7 +66,7 @@ def start() -> None:
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
     app = QApplication(sys.argv)
-    app.setWindowIcon(_logo_icon())
+    app.setWindowIcon(_logo_icon(resource_path))
     app.setApplicationName(
         f"{APP_NAME} - {__version__} - DAT board streams for dispatch teams"
     )
