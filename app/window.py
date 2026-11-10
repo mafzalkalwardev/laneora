@@ -22,13 +22,14 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5.QtWebEngineWidgets import QWebEnginePage, QWebEngineProfile, QWebEngineView
 
-from app import APP_NAME, PASSPHRASE, POWER_DAT, SERVER_URL, SPEEDTEST_URL, __version__
+from app import APP_NAME, PASSPHRASE, SERVER_URL, SPEEDTEST_URL, __version__
 from app.auth import AuthError, AuthSession, authenticate, reauthenticate, start_logger_heartbeat
 from app.browser import apply_cookies, attach_checker_script, clear_profile, inject_local_storage
 from app.crypto_util import decrypt
 from app.roster import upsert_user
+from app.services import DAT, DAT_DUAL, DUAL_SEARCH_TABS, search_url, service_by_id
 from app.streams import apply_http_proxy
 from app.timezone_util import sync_timezone_from_ip
 
@@ -67,6 +68,10 @@ class MainWindow(QMainWindow):
         self.browser: QWebEngineView | None = None
         self.tabs: QTabWidget | None = None
         self.cookieStore = None
+        # Services assigned at login. Default matches accounts that have no list yet.
+        self._services: list[str] = [DAT]
+        self._open_mode = DAT
+        self._view_states: list[dict[str, Any]] = []
 
         for name in ("mark.png", "logo.png", "app.ico"):
             icon_path = resource_path(name)
@@ -168,13 +173,17 @@ class MainWindow(QMainWindow):
             return
 
         self.session = session
+        self._services = list(session.services)
         # Remember successful soft credentials for quicker retests
         try:
             upsert_user(session.username, self.password_edit.text().strip() or session.password)
         except Exception as exc:  # noqa: BLE001
             print("roster save:", exc)
         QMessageBox.information(self, "Success", "Login Successful")
-        self.setWindowTitle(f"{APP_NAME} v{__version__} — DAT One")
+        if self._services == [DAT]:
+            self.setWindowTitle(f"{APP_NAME} v{__version__} — DAT One")
+        else:
+            self.setWindowTitle(f"{APP_NAME} v{__version__}")
         start_logger_heartbeat(session, self._on_multi_screen, self._stop_logger)
         self.show_select_screen(session)
 
@@ -203,6 +212,14 @@ class MainWindow(QMainWindow):
             toolbar.deleteLater()
 
     def show_select_screen(self, session: AuthSession) -> None:
+        self._services = list(session.services)
+        # Original module only: keep the single "Load DAT Stream" screen.
+        if self._services == [DAT]:
+            self._show_original_dat_picker(session)
+            return
+        self._show_service_picker(session)
+
+    def _show_original_dat_picker(self, session: AuthSession) -> None:
         self.remove_all_widgets()
         resp = session.resp
         px, p, pu, pd = session.proxy_host, session.proxy_port, session.proxy_user, session.proxy_password
@@ -228,6 +245,54 @@ class MainWindow(QMainWindow):
         self.layout.addStretch(1)
         self.showMaximized()
 
+    def _show_service_picker(self, session: AuthSession) -> None:
+        self.remove_all_widgets()
+        if not session.resp.get("one"):
+            QMessageBox.warning(self, "Error", "DAT One stream is not on this account.")
+            self._build_login()
+            return
+
+        self.layout.addStretch(1)
+        holder = QWidget()
+        holder.setFixedWidth(420)
+        holder_layout = QVBoxLayout(holder)
+        holder_layout.setContentsMargins(0, 0, 0, 0)
+        holder_layout.setSpacing(14)
+        for service_id in self._services:
+            spec = service_by_id(service_id)
+            btn = QPushButton(spec["button"])
+            btn.setObjectName("streamButton")
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(lambda _checked=False, sid=service_id: self.open_service(sid))
+            holder_layout.addWidget(btn)
+            hint = QLabel(spec["description"])
+            hint.setObjectName("brandSubtitle")
+            hint.setAlignment(Qt.AlignCenter)
+            hint.setWordWrap(True)
+            holder_layout.addWidget(hint)
+        self.layout.addWidget(holder, alignment=Qt.AlignHCenter)
+        self.layout.addStretch(1)
+        self.showMaximized()
+
+    def open_service(self, service_id: str) -> None:
+        session = self.session
+        if session is None:
+            return
+        blob = session.resp.get("one")
+        if not blob:
+            QMessageBox.warning(self, "Error", "DAT One stream is not on this account.")
+            return
+        proxy = (
+            session.proxy_host,
+            session.proxy_port,
+            session.proxy_user,
+            session.proxy_password,
+        )
+        if service_id == DAT_DUAL:
+            self.browse_dual(blob, *proxy, 1)
+            return
+        self.browse(blob, *proxy, "one", 1)
+
     def browse(self, br: str, px, p, pu, pd, opt: str, fc: int = 0) -> None:
         self.remove_all_widgets()
         self.current_sub = opt
@@ -245,6 +310,54 @@ class MainWindow(QMainWindow):
 
         full_make = json.loads(decrypt(PASSPHRASE, br))
         self.make_tab(full_make, opt)
+        self._open_mode = DAT
+        self.setWindowTitle(f"{APP_NAME} v{__version__} — DAT One")
+        self._add_module_bar(DAT)
+
+    def browse_dual(self, br: str, px, p, pu, pd, fc: int = 0) -> None:
+        """Two DAT search tabs. Each tab is a separate WebEngine profile."""
+        self.remove_all_widgets()
+        self._open_mode = DAT_DUAL
+        self.current_sub = "one"
+        self._view_states = []
+        self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True)
+        self.tabs.setMovable(False)
+        self.tabs.tabBar().show()
+        self.layout.addWidget(self.tabs)
+
+        px, pu, pd = str(px), str(pu), str(pd)
+        p = int(p)
+        apply_http_proxy(px, p, pu, pd)
+        if fc == 1:
+            threading.Thread(target=self._timezone_worker, daemon=True).start()
+
+        full_make = json.loads(decrypt(PASSPHRASE, br))
+        for title in DUAL_SEARCH_TABS:
+            self._mount_independent_search(full_make, title)
+        self.tabs.setCurrentIndex(0)
+        current = self.tabs.currentWidget()
+        if isinstance(current, QWebEngineView):
+            self.browser = current
+        self.setWindowTitle(f"{APP_NAME} v{__version__} — Dual DAT Search")
+        self._add_module_bar(DAT_DUAL)
+        self.showMaximized()
+
+    def _add_module_bar(self, current: str) -> None:
+        """Let a login that has several services switch. One service keeps the old chrome."""
+        if len(self._services) < 2:
+            return
+        bar = QToolBar("Services")
+        bar.setMovable(False)
+        for service_id in self._services:
+            spec = service_by_id(service_id)
+            button = QPushButton(spec["short"])
+            button.setCursor(Qt.PointingHandCursor)
+            if service_id != current:
+                button.setObjectName("secondaryButton")
+            button.clicked.connect(lambda _checked=False, sid=service_id: self.open_service(sid))
+            bar.addWidget(button)
+        self.addToolBar(bar)
 
     def _timezone_worker(self) -> None:
         try:
@@ -269,15 +382,8 @@ class MainWindow(QMainWindow):
         self.browser.loadFinished.connect(self.on_load_finished)
         self.success = 0
 
-        if "power" in (opt or "").lower():
-            self.url = POWER_DAT
-        else:
-            raw = str(full_make.get("url") or "")
-            # DAT One opens Search Loads only. Other side tabs stay hidden via the checker.
-            if "one.dat.com" in raw:
-                self.url = "https://one.dat.com/search-loads"
-            else:
-                self.url = raw or "https://one.dat.com/search-loads"
+        # DAT One opens Search Loads only. Other side tabs stay hidden via the checker.
+        self.url = search_url(full_make, opt)
 
         self.store = list(full_make.get("store") or [])
         self.lst = full_make.get("lst") or "{}"
@@ -304,6 +410,57 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(400, _open_stream)
         i = self.tabs.addTab(self.browser, "Screen")
         self.tabs.setCurrentIndex(i)
+
+    def _mount_independent_search(self, full_make: dict[str, Any], title: str) -> None:
+        """One DAT search tab with its own cookie jar and storage.
+
+        The captured session and the app proxy are the same ones the single
+        search uses. The profile is off-the-record so the two tabs do not
+        share navigation or local storage.
+        """
+        assert self.tabs is not None
+        view = QWebEngineView()
+        profile = QWebEngineProfile(view)
+        page = QWebEnginePage(profile, view)
+        view.setPage(page)
+        attach_checker_script(view)
+
+        url = search_url(full_make, "one")
+        store = list(full_make.get("store") or [])
+        lst = full_make.get("lst") or "{}"
+        if not isinstance(lst, str):
+            lst = json.dumps(lst)
+
+        cookie_store = profile.cookieStore()
+        # deleteAllCookies is async. Setting cookies in the same turn gets wiped.
+        cookie_store.deleteAllCookies()
+        clear_profile(profile)
+        state: dict[str, Any] = {"success": 0}
+        self._view_states.append(state)
+
+        def on_finished(ok: bool, view: QWebEngineView = view, lst: str = lst, state: dict[str, Any] = state) -> None:
+            if state["success"]:
+                return
+            if ok:
+                state["success"] = 1
+                inject_local_storage(view, lst)
+            else:
+                view.setUrl(QUrl(view.url().toString()))
+
+        view.loadFinished.connect(on_finished)
+        view.loadProgress.connect(self.on_load_progress)
+
+        def _open(
+            view: QWebEngineView = view,
+            cookie_store=cookie_store,
+            store: list[dict[str, Any]] = store,
+            url: str = url,
+        ) -> None:
+            apply_cookies(cookie_store, store)
+            view.load(QUrl(url))
+
+        QTimer.singleShot(400, _open)
+        self.tabs.addTab(view, title)
 
     def speedtest(self) -> None:
         if self.tabs is None:
@@ -335,6 +492,9 @@ class MainWindow(QMainWindow):
         try:
             session = reauthenticate(self.session)
             resp = session.resp
+            if self._open_mode == DAT_DUAL:
+                self.browse_dual(resp["one"], resp["px"], resp["p"], resp["pu"], resp["pd"], 0)
+                return
             self.browse(
                 resp[opt],
                 resp["px"],

@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT))
 from app import PASSPHRASE, __version__  # noqa: E402
 from app.config import USERS_FILE  # noqa: E402
 from app.crypto_util import encrypt  # noqa: E402
+from app.services import DAT, DAT_DUAL, normalize_services  # noqa: E402
 from server.admin_api import dispatch as dispatch_admin  # noqa: E402
 from server.soft_admin_lib import (  # noqa: E402
     DEFAULT_STREAMS,
@@ -99,6 +100,7 @@ def _build_auth_payload(user: dict) -> dict:
         active_list = [s for s in active.split(",") if s]
     else:
         active_list = list(active)
+    services = normalize_services(user.get("services") if "services" in user else None)
     payload: dict = {
         "status": "okie",
         "p": str(user.get("p", "0")),
@@ -107,7 +109,11 @@ def _build_auth_payload(user: dict) -> dict:
         "pd": str(user.get("pd", "")),
         "active_subs": ",".join(active_list),
     }
-    for name in active_list:
+    # Dual search and the original module both open the DAT One session.
+    stream_names = list(active_list)
+    if (DAT in services or DAT_DUAL in services) and "one" not in stream_names:
+        stream_names.append("one")
+    for name in stream_names:
         stream = streams.get(name) or DEFAULT_STREAMS.get(name) or {
             "url": "https://one.dat.com",
             "store": [],
@@ -115,6 +121,7 @@ def _build_auth_payload(user: dict) -> dict:
             "sst": "",
         }
         payload[name] = encrypt(PASSPHRASE, json.dumps(stream))
+    payload["services"] = ",".join(services)
     return payload
 
 

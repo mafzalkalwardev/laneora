@@ -9,6 +9,7 @@ from typing import Any
 
 from app.config import DATA_DIR, LOCAL_USERS_FILE, SOFT_CONFIG_FILE
 from app.roster import load_roster, save_roster, upsert_user
+from app.services import DAT, normalize_services, require_services
 from server.subscriptions import (
     account_status,
     apply_plan,
@@ -95,10 +96,12 @@ def upsert_account(
     *,
     streams: list[str] | None = None,
     active: bool = True,
+    services: list[str] | None = None,
 ) -> dict[str, Any]:
     username = username.strip()
     password = password.strip()
     streams = streams or ["one", "power"]
+    assigned = None if services is None else require_services(services)
     users = load_local_users()
     cfg = load_config()
     for user in users:
@@ -107,6 +110,8 @@ def upsert_account(
             user["password"] = password
             user["active"] = active
             user["active_subs"] = streams
+            if assigned is not None:
+                user["services"] = assigned
             if not user.get("streams"):
                 user["streams"] = {name: deepcopy(DEFAULT_STREAMS.get(name, DEFAULT_STREAMS["one"])) for name in streams}
             apply_shared_proxy_to_user(user, cfg)
@@ -119,6 +124,8 @@ def upsert_account(
         "active_subs": streams,
         "streams": {name: deepcopy(DEFAULT_STREAMS.get(name, DEFAULT_STREAMS["one"])) for name in streams},
     }
+    if assigned is not None:
+        user["services"] = assigned
     apply_shared_proxy_to_user(user, cfg)
     users.append(user)
     save_local_users(users)
@@ -278,6 +285,7 @@ def public_account(user: dict[str, Any]) -> dict[str, Any]:
         "status": status,
         "remaining_seconds": remaining_seconds(user),
         "cookies": _cookie_count(user),
+        "services": normalize_services(user.get("services") if "services" in user else None),
     }
 
 
@@ -337,10 +345,17 @@ def _drop_roster(username: str) -> None:
     save_roster(kept)
 
 
-def create_account(username: str, password: str, plan_id: str) -> dict[str, Any]:
+def create_account(
+    username: str,
+    password: str,
+    plan_id: str,
+    services: list[str] | None = None,
+) -> dict[str, Any]:
     username = _validate_username(username)
     password = _validate_password(password)
     get_plan(plan_id)
+    # Omitted services stay on the original module. An explicit list is checked.
+    assigned = [DAT] if services is None else require_services(services)
     with _WRITE_LOCK:
         users = load_local_users()
         for user in users:
@@ -351,6 +366,7 @@ def create_account(username: str, password: str, plan_id: str) -> dict[str, Any]
             "password": password,
             "active": True,
             "active_subs": ["one", "power"],
+            "services": assigned,
             "streams": _streams_for_new_user(),
         }
         apply_plan(user, plan_id, extend=False)
@@ -368,6 +384,7 @@ def update_account(
     plan_id: str | None = None,
     extend: bool = False,
     active: bool | None = None,
+    services: list[str] | None = None,
 ) -> dict[str, Any]:
     username = username.strip()
     if password is not None and password != "":
@@ -376,6 +393,7 @@ def update_account(
         password = None
     if plan_id:
         get_plan(plan_id)
+    assigned = None if services is None else require_services(services)
     with _WRITE_LOCK:
         users = load_local_users()
         target = None
@@ -391,12 +409,19 @@ def update_account(
             apply_plan(target, plan_id, extend=extend)
         if active is not None and not plan_id:
             target["active"] = bool(active)
+        if assigned is not None:
+            target["services"] = assigned
         save_local_users(users)
         saved_password = str(target.get("password") or "")
         saved_name = str(target.get("username") or username)
         snapshot = public_account(target)
     _sync_roster(saved_name, saved_password)
     return snapshot
+
+
+def set_account_services(username: str, services: list[str]) -> dict[str, Any]:
+    """Replace the modules one login is allowed to open."""
+    return update_account(username, services=services)
 
 
 def delete_account(username: str) -> None:

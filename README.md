@@ -85,13 +85,22 @@ Accounts that have never been given a plan can still sign in. The clock starts o
 
 You can also change a user’s password, disable the account, or delete it. Disabling blocks the next login even if time is left. Deleting removes the Soft login. The dashboard password is separate from any client user, including a client user named admin.
 
+Each user has services. Those are the modules that login is allowed to open:
+
+| Service | What the dispatcher sees |
+| --- | --- |
+| DAT Search | The original module. One load-search screen. |
+| Dual DAT Search | Two DAT search tabs. Each tab is its own search session. Both use the same shared board session and the same proxy. |
+
+Accounts that have no service list stay on DAT Search. That is the existing behaviour. A new user starts on DAT Search unless you also check Dual DAT Search. Check the modules on the user card, then **Save services**. The dispatcher sees the change the next time they sign in. A login only shows the services you left checked.
+
 ### 3. The dispatcher signs in
 
 The client window shows the Laneora icon, the name, username, password, and Login. Nothing else.
 
 <img src="docs/images/client-login.png" alt="Laneora client sign-in with the icon centered above username, password, and Login" width="720" />
 
-A correct login shows **Login Successful**. The next screen has one button, which opens the load search. The app does not offer a second board product.
+A correct login shows **Login Successful**. The next screen lists the services on that account. A user who only has DAT Search still sees the one button that opens the load search. A user who also has Dual DAT Search can open two search tabs and switch between them.
 
 On a dispatcher PC, run `dist\Laneora.exe` from `dist\Laneora Soft.bat`. The bat sets the server address. On this LAN that address is `http://192.168.1.20:8787`. If the admin PC cannot be reached, the client does not start an empty local server of its own.
 
@@ -125,7 +134,7 @@ Refreshing cookies is still a capture on the admin PC while the static IP is on,
 1. Same static US egress address as the admin PC.
 2. Soft server running on the admin PC.
 3. Laneora Soft username and password from the admin desk.
-4. Login, then the single button that opens the load search.
+4. Login, then open DAT Search. If the admin also assigned Dual DAT Search, that button opens two search tabs.
 
 Operator notes for handing a PC to someone are in `CLIENT_INSTALL.md`. Day-to-day server commands are in `ADMIN_OPS.md`.
 
@@ -144,6 +153,7 @@ This is the stack behind the workflow above.
 | Cookie restore | Cookie expiry from the capture is unix time, written into the WebEngine cookie store, then the search URL loads |
 | Document script | After the page starts, a script keeps the view on the search route and hides the side menu, insurance banner, and mailbox connect button |
 | Single-screen heartbeat | The server remembers the newest login for that username and answers the older window with a failed check |
+| Assigned services | The admin checks which modules a login can open. No list means the original DAT Search |
 | Explicit Windows app id | The taskbar icon is the Laneora mark, set before the first window, instead of the Python icon |
 | PyInstaller onefile build | `build.ps1` produces `dist\Laneora.exe` with the mark as the program icon |
 

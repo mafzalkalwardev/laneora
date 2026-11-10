@@ -16,6 +16,7 @@ from server.soft_admin_lib import (
     set_dashboard_password,
     update_account,
 )
+from app.services import service_catalog
 from server.subscriptions import account_status, plan_catalog
 
 _HERE = Path(__file__).resolve().parent
@@ -155,7 +156,17 @@ def dispatch(handler: Any) -> bool:
 
         if method == "GET" and path == "/admin/api/users":
             users = list_accounts()
-            _send_json(handler, 200, {"ok": True, "users": users, "plans": plan_catalog(), "summary": _summary(users)})
+            _send_json(
+                handler,
+                200,
+                {
+                    "ok": True,
+                    "users": users,
+                    "plans": plan_catalog(),
+                    "services": service_catalog(),
+                    "summary": _summary(users),
+                },
+            )
             return True
         if method == "POST" and path == "/admin/api/users":
             body = _read_json(handler)
@@ -163,6 +174,7 @@ def dispatch(handler: Any) -> bool:
                 str(body.get("username") or ""),
                 str(body.get("password") or ""),
                 str(body.get("plan") or ""),
+                services=body.get("services") if "services" in body else None,
             )
             _send_json(handler, 200, {"ok": True, "user": user})
             return True
@@ -175,6 +187,7 @@ def dispatch(handler: Any) -> bool:
                 plan_id=str(body.get("plan") or "") or None,
                 extend=bool(body.get("extend")),
                 active=None if active is None else bool(active),
+                services=body.get("services") if "services" in body else None,
             )
             _send_json(handler, 200, {"ok": True, "user": user, "status": account_status(user)})
             return True
