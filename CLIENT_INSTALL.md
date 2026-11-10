@@ -2,8 +2,13 @@
 
 ## Package to send the client
 
-1. **`dist\Laneora.exe`** — built with `build.ps1`  
-2. Optional shortcut that sets Soft URL (recommended)
+The public download is the latest Windows zip. It contains `Laneora.exe` and `Laneora Soft.bat`:
+
+https://github.com/mafzalkalwardev/laneora/releases/latest/download/Laneora-windows.zip
+
+Run **Laneora Soft.bat**. It sets the Soft server address and starts the exe. Edit that address in the bat before you hand the folder to a dispatcher.
+
+Building it yourself still works:
 
 ### Build the EXE (on your machine)
 

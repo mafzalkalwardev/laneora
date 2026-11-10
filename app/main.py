@@ -24,7 +24,7 @@ def _windows_app_id() -> None:
         pass
 
 
-def _logo_icon() -> QIcon:
+def _logo_icon(resource_path) -> QIcon:
     for name in ("mark.png", "logo.png", "app.ico"):
         path = resource_path(name)
         if os.path.exists(path):
@@ -43,6 +43,22 @@ def load_stylesheet(app: QApplication, stylesheet_path: str) -> None:
 
 
 def start() -> None:
+    if "--self-check" in sys.argv or "--help" in sys.argv:
+        if "--help" in sys.argv:
+            message = (
+                "Laneora\n"
+                "  Laneora.exe                      start the app\n"
+                "  Laneora.exe --lightweight        less memory, no GPU, after restart\n"
+                "  Laneora.exe --software-rendering skip GPU compositing\n"
+                "  Laneora.exe --self-check         exit 0 if this exe can start\n"
+                "The server address comes from LANEORA_SERVER_URL. Laneora Soft.bat sets it.\n"
+            )
+            try:
+                sys.stdout.write(message)
+            except Exception:
+                pass
+        raise SystemExit(0)
+
     # Chromium reads GPU flags at startup, before the browser module is imported.
     from app.runtime_mode import apply_startup_flags
 
@@ -66,7 +82,7 @@ def start() -> None:
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
     app = QApplication(sys.argv)
-    app.setWindowIcon(_logo_icon())
+    app.setWindowIcon(_logo_icon(resource_path))
     app.setApplicationName(
         f"{APP_NAME} - {__version__} - DAT board streams for dispatch teams"
     )

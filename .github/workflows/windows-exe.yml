@@ -1,0 +1,69 @@
+name: Windows exe
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build Laneora.exe
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File .\build.ps1
+
+      - name: Confirm Qt WebEngine is in the exe
+        shell: pwsh
+        run: |
+          $exe = Get-Item .\dist\Laneora.exe
+          Write-Host "Laneora.exe $($exe.Length) bytes"
+          if ($exe.Length -lt 30MB) {
+            throw "Laneora.exe is too small to include the Qt WebEngine runtime."
+          }
+
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          $proc = Start-Process -FilePath .\dist\Laneora.exe -ArgumentList "--self-check" -Wait -PassThru
+          Write-Host "self-check exit $($proc.ExitCode)"
+          if ($proc.ExitCode -ne 0) { exit $proc.ExitCode }
+
+      - name: Zip exe and launcher
+        shell: pwsh
+        run: |
+          Copy-Item -Force ".\Laneora Soft.bat" ".\dist\Laneora Soft.bat"
+          if (Test-Path .\dist\Laneora-windows.zip) { Remove-Item .\dist\Laneora-windows.zip }
+          Compress-Archive -Path @(".\dist\Laneora.exe", ".\dist\Laneora Soft.bat") -DestinationPath .\dist\Laneora-windows.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Laneora-windows
+          path: |
+            dist/Laneora.exe
+            dist/Laneora Soft.bat
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete windows --yes --cleanup-tag 2>$null
+          gh release create windows .\dist\Laneora-windows.zip --latest --title "Laneora for Windows" --notes "Laneora.exe and Laneora Soft.bat. Run the bat. It sets the Soft server address and starts the exe."
