@@ -382,6 +382,18 @@ class MainWindow(QMainWindow):
     def _on_load_timeout(self, view: QWebEngineView, title: str) -> None:
         if _qt_object_deleted(view) or id(view) in self._loaded_ids:
             return
+        url = ""
+        try:
+            url = view.url().toString()
+        except RuntimeError:
+            url = ""
+        if is_blank_url(url):
+            self._show_problem(
+                title,
+                "The browser stayed on a blank page. The DAT session was not applied. "
+                "Cookies were deleted after they were saved, or stored with no site address.",
+            )
+            return
         self._show_problem(title, "The page did not finish loading within 20 seconds")
 
     def _on_renderer_stopped(self, view: QWebEngineView, title: str, status: object, code: object) -> None:

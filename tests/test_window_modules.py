@@ -250,6 +250,10 @@ class WindowModuleTest(unittest.TestCase):
             with patch("app.client_log.log_dir", return_value=folder), patch(
                 "app.runtime_mode.log_dir", return_value=folder
             ):
+                self.window._on_load_timeout(self.window.browser, "Screen")
+                self.assertIsNotNone(self.window._banner)
+                self.assertIn("DAT session was not applied", self.window._banner_text.text())
+                self.assertIn("no site address", self.window._banner_text.text())
                 self.window._note_load_result(self.window.browser, False, "Screen")
                 self.assertIsNotNone(self.window._banner)
                 self.assertIn("blank page", self.window._banner_text.text())
