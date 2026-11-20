@@ -16,7 +16,7 @@ Dispatchers sign in with a Laneora username. The app opens the load search alrea
 [![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/mafzalkalwardev/laneora)
 [![Release](https://img.shields.io/badge/Release-v3.0.0-F5A524)](https://github.com/mafzalkalwardev/laneora/releases)
 
-[How it works](#how-the-whole-system-works) · [Admin](#admin-dashboard) · [Client](#client-sign-in) · [Techniques](#techniques) · [Setup](#setup-windows)
+[How it works](#how-the-whole-system-works) · [HTTP API](#http-api) · [Admin](#admin-dashboard) · [Client](#client-sign-in) · [Techniques](#techniques) · [Setup](#setup-windows)
 
 </div>
 
@@ -141,6 +141,21 @@ Refreshing cookies is still a capture on the admin PC while the static IP is on,
 4. Login, then open the module the admin assigned. DAT Search is one screen. Dual, 3, and 4 DAT Search open that many search tabs.
 
 Operator notes for handing a PC to someone are in `CLIENT_INSTALL.md`. Day-to-day server commands are in `ADMIN_OPS.md`.
+
+---
+
+## HTTP API
+
+The Soft server exposes a load search API on port 8787. Any app that can reach that PC calls `http://<that-pc>:8787`. Sign in with a Laneora username and password. The token searches the board session Laneora already stores and opens one load's details. It cannot create users, change plans, or use the admin desk.
+
+```http
+POST /api/v1/session
+Content-Type: application/json
+
+{"username": "<Laneora username>", "password": "<Laneora password>"}
+```
+
+Send `token` as `Authorization: Bearer <token>`. `POST /api/v1/loads/search` takes origin, destination, equipment, and deadhead. `GET /api/v1` lists the routes. Examples are in `ADMIN_OPS.md`.
 
 ---
 

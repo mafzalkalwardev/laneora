@@ -65,8 +65,11 @@ def _json_bytes(payload: dict[str, Any]) -> bytes:
 
 
 def _read_json(handler: Any) -> dict[str, Any]:
-    length = int(handler.headers.get("Content-Length") or "0")
-    if length > 64_000:
+    try:
+        length = int(handler.headers.get("Content-Length") or "0")
+    except ValueError as exc:
+        raise ValueError("Send JSON.") from exc
+    if length < 0 or length > 64_000:
         raise ValueError("Request is too large.")
     raw = handler.rfile.read(length) if length else b""
     if not raw:

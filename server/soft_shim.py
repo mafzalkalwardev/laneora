@@ -28,9 +28,11 @@ from app.config import USERS_FILE  # noqa: E402
 from app.crypto_util import encrypt  # noqa: E402
 from app.services import normalize_services, opens_dat_search  # noqa: E402
 from server.admin_api import dispatch as dispatch_admin  # noqa: E402
+from server.public_api import dispatch as dispatch_public  # noqa: E402
 from server.soft_admin_lib import (  # noqa: E402
     DEFAULT_STREAMS,
     apply_shared_proxy_to_user,
+    ensure_api_token,
     ensure_dashboard_login,
     load_config,
     load_local_users,
@@ -182,13 +184,34 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(404)
         self.end_headers()
 
+    def _dispatch_app(self) -> bool:
+        if dispatch_public(self):
+            return True
+        return dispatch_admin(self)
+
+    def do_OPTIONS(self) -> None:  # noqa: N802
+        if self._dispatch_app():
+            return
+        self.send_response(404)
+        self.end_headers()
+
+    def do_PATCH(self) -> None:  # noqa: N802
+        if self._dispatch_app():
+            return
+        self._send(404, "not found")
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        if self._dispatch_app():
+            return
+        self._send(404, "not found")
+
     def do_POST(self) -> None:  # noqa: N802
-        if dispatch_admin(self):
+        if self._dispatch_app():
             return
         self._send(404, "not found")
 
     def do_GET(self) -> None:  # noqa: N802
-        if dispatch_admin(self):
+        if self._dispatch_app():
             return
         parsed = urlparse(self.path)
         qs = parse_qs(parsed.query)
@@ -271,8 +294,11 @@ def main() -> None:
     users = _all_accounts()
     proxy = cfg.get("shared_proxy") or {}
     ensure_dashboard_login()
+    ensure_api_token()
     print(f"Laneora Soft shim on http://{HOST}:{PORT}")
     print(f"Admin dashboard: http://127.0.0.1:{PORT}/admin")
+    print(f"Load API: http://127.0.0.1:{PORT}/api/v1")
+    print("Load API sign-in is a Laneora username. It searches loads and cannot create users.")
     print(f"multi_screen={cfg.get('allow_multi_screen', True)}  shared_proxy={proxy.get('px')}:{proxy.get('p')}")
     print(f"Accounts ({len(users)}):")
     for user in users:
