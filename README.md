@@ -16,7 +16,7 @@ Dispatchers sign in with a Laneora username. The app opens the load search alrea
 [![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/mafzalkalwardev/laneora)
 [![Release](https://img.shields.io/badge/Release-v3.0.0-F5A524)](https://github.com/mafzalkalwardev/laneora/releases)
 
-[How it works](#how-the-whole-system-works) · [Admin](#admin-dashboard) · [Client](#client-sign-in) · [Techniques](#techniques) · [Setup](#setup-windows)
+[How it works](#how-the-whole-system-works) · [HTTP API](#http-api) · [Admin](#admin-dashboard) · [Client](#client-sign-in) · [Techniques](#techniques) · [Setup](#setup-windows)
 
 </div>
 
@@ -141,6 +141,21 @@ Refreshing cookies is still a capture on the admin PC while the static IP is on,
 4. Login, then open the module the admin assigned. DAT Search is one screen. Dual, 3, and 4 DAT Search open that many search tabs.
 
 Operator notes for handing a PC to someone are in `CLIENT_INSTALL.md`. Day-to-day server commands are in `ADMIN_OPS.md`.
+
+---
+
+## HTTP API
+
+The Soft server exposes a JSON API on the same port as the admin desk. Any HTTP client that can reach that port can create users, change plans, and assign services. It is the server you start with `Start Soft Server.bat`, listening on `0.0.0.0:8787`. Call it at `http://<that-pc>:8787`. `GET /api/v1` lists the routes.
+
+```http
+POST /api/v1/session
+Content-Type: application/json
+
+{"username": "<dashboard username>", "password": "<dashboard password>"}
+```
+
+The response includes `token`. Send it on later calls as `Authorization: Bearer <token>`. The server also prints the token when it starts. Route details and curl examples are in `ADMIN_OPS.md`.
 
 ---
 

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import os
+import secrets
 import threading
 from copy import deepcopy
 from pathlib import Path
@@ -248,6 +250,32 @@ def dashboard_login() -> dict[str, str]:
     if not dash.get("username") or not dash.get("password"):
         return ensure_dashboard_login()
     return {"username": str(dash["username"]), "password": str(dash["password"])}
+
+
+def ensure_api_token() -> str:
+    """Bearer token for /api/v1. An env override wins and is not written to disk."""
+    override = os.environ.get("LANEORA_API_TOKEN", "").strip()
+    if override:
+        return override
+    with _WRITE_LOCK:
+        cfg = load_config()
+        token = str(cfg.get("api_token") or "").strip()
+        if len(token) < 16:
+            token = secrets.token_urlsafe(32)
+            cfg["api_token"] = token
+            save_config(cfg)
+        return token
+
+
+def rotate_api_token() -> str:
+    if os.environ.get("LANEORA_API_TOKEN", "").strip():
+        raise ValueError("LANEORA_API_TOKEN is set. Change that value to rotate the token.")
+    with _WRITE_LOCK:
+        cfg = load_config()
+        token = secrets.token_urlsafe(32)
+        cfg["api_token"] = token
+        save_config(cfg)
+        return token
 
 
 def set_dashboard_password(current: str, new_password: str) -> None:
