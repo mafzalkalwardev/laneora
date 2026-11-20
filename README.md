@@ -146,16 +146,16 @@ Operator notes for handing a PC to someone are in `CLIENT_INSTALL.md`. Day-to-da
 
 ## HTTP API
 
-The Soft server exposes a JSON API on the same port as the admin desk. Any HTTP client that can reach that port can create users, change plans, and assign services. It is the server you start with `Start Soft Server.bat`, listening on `0.0.0.0:8787`. Call it at `http://<that-pc>:8787`. `GET /api/v1` lists the routes.
+The Soft server exposes a load search API on port 8787. Any app that can reach that PC calls `http://<that-pc>:8787`. Sign in with a Laneora username and password. The token searches the board session Laneora already stores and opens one load's details. It cannot create users, change plans, or use the admin desk.
 
 ```http
 POST /api/v1/session
 Content-Type: application/json
 
-{"username": "<dashboard username>", "password": "<dashboard password>"}
+{"username": "<Laneora username>", "password": "<Laneora password>"}
 ```
 
-The response includes `token`. Send it on later calls as `Authorization: Bearer <token>`. The server also prints the token when it starts. Route details and curl examples are in `ADMIN_OPS.md`.
+Send `token` as `Authorization: Bearer <token>`. `POST /api/v1/loads/search` takes origin, destination, equipment, and deadhead. `GET /api/v1` lists the routes. Examples are in `ADMIN_OPS.md`.
 
 ---
 

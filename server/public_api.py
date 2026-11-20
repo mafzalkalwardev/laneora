@@ -1,37 +1,25 @@
-"""JSON API for the Laneora Soft server.
+"""Load search API for any app that can reach the Soft server.
 
-Any HTTP client that can reach the server can call these routes. Send the
-dashboard username and password to POST /api/v1/session, then pass the returned
-token as Authorization: Bearer <token> (or X-API-Key).
+Sign in with a Laneora username and password. The token can search loads and
+open one load's details. It cannot create users, change plans, or open the
+admin desk.
 """
 from __future__ import annotations
 
 import hmac
 import json
-import re
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, urlparse
 
 from app import __version__
-from app.services import service_catalog
-from server.soft_admin_lib import (
-    create_account,
-    dashboard_login,
-    delete_account,
-    ensure_api_token,
-    list_accounts,
-    load_config,
-    rotate_api_token,
-    update_account,
-)
-from server.subscriptions import account_status, plan_catalog
-
-_USER_PATH = re.compile(r"^/api/v1/users/([^/]+)$")
+from server.load_board import BoardError, load_detail, search_loads
+from server.soft_admin_lib import ensure_api_token, load_local_users
+from server.subscriptions import denial_payload
 
 _CORS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Authorization, Content-Type, X-API-Key",
-    "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Max-Age": "86400",
 }
 
@@ -42,30 +30,44 @@ _ROUTES: list[dict[str, Any]] = [
         "method": "POST",
         "path": "/api/v1/session",
         "auth": False,
-        "description": "Exchange the dashboard username and password for a bearer token.",
+        "description": "Exchange a Laneora username and password for a search token.",
     },
-    {"method": "GET", "path": "/api/v1/catalog", "auth": True, "description": "Plans and services."},
-    {"method": "GET", "path": "/api/v1/users", "auth": True, "description": "List accounts."},
-    {"method": "POST", "path": "/api/v1/users", "auth": True, "description": "Create an account."},
-    {"method": "GET", "path": "/api/v1/users/{username}", "auth": True, "description": "One account."},
-    {
-        "method": "PATCH",
-        "path": "/api/v1/users/{username}",
-        "auth": True,
-        "description": "Change the password, plan, active flag, or services.",
-    },
-    {"method": "DELETE", "path": "/api/v1/users/{username}", "auth": True, "description": "Delete an account."},
     {
         "method": "POST",
-        "path": "/api/v1/token/rotate",
+        "path": "/api/v1/loads/search",
         "auth": True,
-        "description": "Replace the bearer token. The previous token stops working.",
+        "description": "Search loads on the board session stored in Laneora.",
+    },
+    {
+        "method": "GET",
+        "path": "/api/v1/loads/detail",
+        "auth": True,
+        "description": "One load's extra details. Query: search_id, match_id.",
     },
 ]
 
 
 def _eq(left: str, right: str) -> bool:
     return hmac.compare_digest(left.encode("utf-8"), right.encode("utf-8"))
+
+
+def issue_token(username: str) -> str:
+    secret = ensure_api_token().encode("utf-8")
+    name = username.strip()
+    mac = hmac.new(secret, name.lower().encode("utf-8"), "sha256").hexdigest()
+    return f"{name}.{mac}"
+
+
+def token_username(token: str) -> str | None:
+    if "." not in token:
+        return None
+    name, mac = token.rsplit(".", 1)
+    if not name or not mac:
+        return None
+    expected = issue_token(name).rsplit(".", 1)[1]
+    if not _eq(mac, expected):
+        return None
+    return name
 
 
 def _path(handler: Any) -> str:
@@ -118,114 +120,42 @@ def _presented_token(handler: Any) -> str:
     return (handler.headers.get("X-API-Key") or "").strip()
 
 
-def _authorized(handler: Any) -> bool:
-    presented = _presented_token(handler)
-    expected = ensure_api_token()
-    if not presented or not expected:
-        return False
-    return _eq(presented, expected)
-
-
-def _require_auth(handler: Any) -> bool:
-    if _authorized(handler):
-        return True
-    _send_json(handler, 401, {"ok": False, "error": "Send Authorization: Bearer <token>."})
-    return False
-
-
-def _summary(users: list[dict[str, Any]]) -> dict[str, int]:
-    counts = {"total": len(users), "active": 0, "expired": 0, "disabled": 0, "unset": 0}
-    for user in users:
-        status = str(user.get("status") or "")
-        if status in counts:
-            counts[status] += 1
-    return counts
-
-
-def _find_user(username: str) -> dict[str, Any] | None:
+def _account(username: str, password: str) -> dict[str, Any]:
     wanted = username.strip().lower()
-    for user in list_accounts():
-        if str(user.get("username") or "").lower() == wanted:
-            return user
-    return None
-
-
-def _username_from_path(path: str) -> str | None:
-    match = _USER_PATH.match(path)
-    if match is None:
-        return None
-    return unquote(match.group(1)).strip()
-
-
-def _index() -> dict[str, Any]:
-    return {
-        "ok": True,
-        "service": "laneora",
-        "version": __version__,
-        "auth": "Authorization: Bearer <token>",
-        "session": {
-            "method": "POST",
-            "path": "/api/v1/session",
-            "body": {"username": "dashboard username", "password": "dashboard password"},
-        },
-        "routes": _ROUTES,
-    }
-
-
-def _health() -> dict[str, Any]:
-    cfg = load_config()
-    return {
-        "ok": True,
-        "service": "laneora",
-        "version": __version__,
-        "accounts": len(list_accounts()),
-        "allow_multi_screen": bool(cfg.get("allow_multi_screen", True)),
-    }
+    secret = password.strip().lower()
+    for user in load_local_users():
+        if str(user.get("username") or "").lower() != wanted:
+            continue
+        if str(user.get("password") or "").lower() != secret:
+            break
+        denied = denial_payload(user)
+        if denied:
+            raise PermissionError(str(denied.get("message") or "This account cannot search."))
+        return user
+    raise PermissionError("Incorrect Laneora login.")
 
 
 def _session(handler: Any) -> None:
     body = _read_json(handler)
-    dash = dashboard_login()
-    username = str(body.get("username") or "").strip()
-    password = str(body.get("password") or "")
-    if not (_eq(username, dash["username"]) and _eq(password, dash["password"])):
-        _send_json(handler, 401, {"ok": False, "error": "Incorrect dashboard login."})
+    try:
+        user = _account(str(body.get("username") or ""), str(body.get("password") or ""))
+    except PermissionError as exc:
+        _send_json(handler, 401, {"ok": False, "error": str(exc)})
         return
+    name = str(user.get("username") or "")
     _send_json(
         handler,
         200,
-        {
-            "ok": True,
-            "token_type": "Bearer",
-            "token": ensure_api_token(),
-            "username": dash["username"],
-        },
+        {"ok": True, "token_type": "Bearer", "token": issue_token(name), "username": name, "scope": "loads"},
     )
 
 
-def _create(handler: Any) -> None:
-    body = _read_json(handler)
-    user = create_account(
-        str(body.get("username") or ""),
-        str(body.get("password") or ""),
-        str(body.get("plan") or ""),
-        services=body.get("services") if "services" in body else None,
-    )
-    _send_json(handler, 200, {"ok": True, "user": user})
-
-
-def _patch(handler: Any, username: str) -> None:
-    body = _read_json(handler)
-    active = body.get("active") if "active" in body else None
-    user = update_account(
-        username,
-        password=str(body.get("password") or "") or None,
-        plan_id=str(body.get("plan") or "") or None,
-        extend=bool(body.get("extend")),
-        active=None if active is None else bool(active),
-        services=body.get("services") if "services" in body else None,
-    )
-    _send_json(handler, 200, {"ok": True, "user": user, "status": account_status(user)})
+def _caller(handler: Any) -> str | None:
+    username = token_username(_presented_token(handler))
+    if username is None:
+        _send_json(handler, 401, {"ok": False, "error": "Send Authorization: Bearer <token> from POST /api/v1/session."})
+        return None
+    return username
 
 
 def dispatch(handler: Any) -> bool:
@@ -239,59 +169,50 @@ def dispatch(handler: Any) -> bool:
             _send(handler, 204, b"", "text/plain; charset=utf-8")
             return True
         if path == "/api/v1" and method == "GET":
-            _send_json(handler, 200, _index())
+            _send_json(
+                handler,
+                200,
+                {
+                    "ok": True,
+                    "service": "laneora",
+                    "version": __version__,
+                    "scope": "loads",
+                    "auth": "Authorization: Bearer <token>",
+                    "session": {
+                        "method": "POST",
+                        "path": "/api/v1/session",
+                        "body": {"username": "Laneora username", "password": "Laneora password"},
+                    },
+                    "routes": _ROUTES,
+                },
+            )
             return True
         if path == "/api/v1/health" and method == "GET":
-            _send_json(handler, 200, _health())
+            _send_json(handler, 200, {"ok": True, "service": "laneora", "version": __version__})
             return True
         if path == "/api/v1/session" and method == "POST":
             _session(handler)
             return True
-
-        username = _username_from_path(path)
-        known = path in {
-            "/api/v1",
-            "/api/v1/health",
-            "/api/v1/session",
-            "/api/v1/catalog",
-            "/api/v1/users",
-            "/api/v1/token/rotate",
-        } or username is not None
-        if not known:
-            _send_json(handler, 404, {"ok": False, "error": "Not found."})
-            return True
-        if not _require_auth(handler):
-            return True
-
-        if path == "/api/v1/catalog" and method == "GET":
-            _send_json(handler, 200, {"ok": True, "plans": plan_catalog(), "services": service_catalog()})
-            return True
-        if path == "/api/v1/users" and method == "GET":
-            users = list_accounts()
-            _send_json(handler, 200, {"ok": True, "users": users, "summary": _summary(users)})
-            return True
-        if path == "/api/v1/users" and method == "POST":
-            _create(handler)
-            return True
-        if path == "/api/v1/token/rotate" and method == "POST":
-            token = rotate_api_token()
-            _send_json(handler, 200, {"ok": True, "token_type": "Bearer", "token": token})
-            return True
-        if username is not None and method == "GET":
-            user = _find_user(username)
-            if user is None:
-                _send_json(handler, 404, {"ok": False, "error": f"User '{username}' was not found."})
+        if path in ("/api/v1/loads/search", "/api/v1/loads/detail"):
+            username = _caller(handler)
+            if username is None:
                 return True
-            _send_json(handler, 200, {"ok": True, "user": user})
+            if path == "/api/v1/loads/search" and method == "POST":
+                _send_json(handler, 200, search_loads(username, _read_json(handler)))
+                return True
+            if path == "/api/v1/loads/detail" and method == "GET":
+                query = parse_qs(urlparse(handler.path).query)
+                search_id = (query.get("search_id") or [""])[0]
+                match_id = (query.get("match_id") or [""])[0]
+                _send_json(handler, 200, load_detail(username, search_id, match_id))
+                return True
+            _send_json(handler, 405, {"ok": False, "error": "Method not allowed."})
             return True
-        if username is not None and method == "PATCH":
-            _patch(handler, username)
-            return True
-        if username is not None and method == "DELETE":
-            delete_account(username)
-            _send_json(handler, 200, {"ok": True})
-            return True
-        _send_json(handler, 405, {"ok": False, "error": "Method not allowed."})
+        _send_json(handler, 404, {"ok": False, "error": "Not found. This API searches loads only."})
+    except PermissionError as exc:
+        _send_json(handler, 401, {"ok": False, "error": str(exc)})
+    except BoardError as exc:
+        _send_json(handler, exc.status, {"ok": False, "error": str(exc)})
     except ValueError as exc:
         _send_json(handler, 400, {"ok": False, "error": str(exc)})
     except Exception as exc:  # noqa: BLE001

@@ -294,14 +294,11 @@ def main() -> None:
     users = _all_accounts()
     proxy = cfg.get("shared_proxy") or {}
     ensure_dashboard_login()
-    token = ensure_api_token()
+    ensure_api_token()
     print(f"Laneora Soft shim on http://{HOST}:{PORT}")
     print(f"Admin dashboard: http://127.0.0.1:{PORT}/admin")
-    print(f"HTTP API: http://127.0.0.1:{PORT}/api/v1")
-    if __import__("os").environ.get("LANEORA_API_TOKEN", "").strip():
-        print("API token: LANEORA_API_TOKEN")
-    else:
-        print(f"API token: {token}")
+    print(f"Load API: http://127.0.0.1:{PORT}/api/v1")
+    print("Load API sign-in is a Laneora username. It searches loads and cannot create users.")
     print(f"multi_screen={cfg.get('allow_multi_screen', True)}  shared_proxy={proxy.get('px')}:{proxy.get('p')}")
     print(f"Accounts ({len(users)}):")
     for user in users:
