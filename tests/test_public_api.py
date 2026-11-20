@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import tempfile
 import threading
 import unittest
@@ -224,6 +225,25 @@ class LoadApiTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 409, response.text)
         self.assertIn("board session", response.json()["error"])
+
+    def test_negative_content_length_is_rejected(self) -> None:
+        host, port = self.httpd.server_address
+        with socket.create_connection((host, port), timeout=2) as sock:
+            sock.sendall(
+                b"POST /api/v1/session HTTP/1.1\r\n"
+                b"Host: 127.0.0.1\r\n"
+                b"Content-Length: -1\r\n"
+                b"Connection: close\r\n"
+                b"\r\n"
+            )
+            data = b""
+            while True:
+                chunk = sock.recv(1024)
+                if not chunk:
+                    break
+                data += chunk
+        self.assertTrue(data.startswith(b"HTTP/1.0 400") or data.startswith(b"HTTP/1.1 400"), data)
+        self.assertIn(b"too large", data.lower())
 
     def test_admin_cookie_login_still_works(self) -> None:
         session = requests.Session()
