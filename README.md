@@ -4,6 +4,8 @@
 
 # Laneora
 
+Official site: https://laneora.induswebagency.com/
+
 **Windows desktop client for shared freight-board access, with an admin desk for users and plans**
 
 Dispatchers sign in with a Laneora username. The app opens the load search already signed in. An admin creates those usernames, sets how long they last, and keeps one board session for every client.
